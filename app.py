@@ -1,16 +1,17 @@
 """
-SmarNet - Production MVP (v3.1)
+SmarNet - Production MVP (v3.3)
 ----------------------------------------
-Optimized for Deployment on share.streamlit.io
+Optimized for GitHub Codespaces & Streamlit Cloud
 
 Features included:
-1. Session-Isolated Profiles: Multi-user safe (no database profile overrides).
-2. Global Database Syncing: Saved contacts and analytics sync in real-time.
-3. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
-4. VIP Resume Field Support: Render custom interactive clickable resume links.
-5. Anti-Duplicate Filter: Prevents double-saving identical names per event.
+1. International Country Codes: Dropdown selector with flags for phone numbers.
+2. Self-Scan Prevention: Blocks users from saving their own profile name.
+3. Resume Image Uploader: Encodes profile resume images directly into the QR payload.
+4. Session-Isolated Profiles: Multi-user safe session sandboxing.
+5. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
 """
 
+import base64
 import json
 import sqlite3
 from datetime import datetime
@@ -32,6 +33,21 @@ DEFAULT_VISIBILITY = {
     "Supplier": ["name", "title", "company", "email", "phone"],
     "Other": ["name", "company", "email"],
 }
+
+# Supported international country dialing configurations
+COUNTRY_CODES = [
+    ("+1", "🇺🇸/🇨🇦 +1"),
+    ("+44", "🇬🇧 +44"),
+    ("+91", "🇮🇳 +91"),
+    ("+61", "🇦🇺 +61"),
+    ("+49", "🇩🇪 +49"),
+    ("+33", "🇫🇷 +33"),
+    ("+81", "🇯🇵 +81"),
+    ("+86", "🇨🇳 +86"),
+    ("+55", "🇧🇷 +55"),
+    ("+34", "🇪🇸 +34"),
+    ("+39", "🇮🇹 +39"),
+]
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
@@ -131,7 +147,6 @@ def get_scan_log():
 
 
 def get_known_events():
-    """Dynamically reads tracked event contexts straight from the global database entries."""
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT DISTINCT event FROM contacts WHERE event IS NOT NULL AND event != ''")
@@ -144,7 +159,6 @@ def get_known_events():
 # Core QR Utilities
 # ---------------------------------------------------------------------------
 def decode_qr_from_image(image: Image.Image):
-    """Upgraded scanner engine using pyzbar to accurately unpack dense matrix configurations."""
     try:
         decoded_objects = decode(image)
         if decoded_objects:
@@ -210,16 +224,19 @@ def render_business_card(data):
                 web = str(data["website"])
                 url = web if web.startswith(("http://", "https://")) else f"https://{web}"
                 st.markdown(f"🌐 **Website:** [Visit Site]({url})")
-            # Clickable Resume Support Added Here
-            if data.get("resume"):
-                res = str(data["resume"])
-                url = res if res.startswith(("http://", "https://")) else f"https://{res}"
-                st.markdown(f"📄 **Resume:** [View Resume Image]({url})")
 
         if data.get("pitch"):
             st.info(f"💡 **Elevator Pitch:**\n{data['pitch']}")
         if data.get("bio"):
             st.markdown(f"📝 **Bio:** *{data['bio']}*")
+
+        if data.get("resume_b64"):
+            with st.expander("📄 View Attached Resume Image", expanded=False):
+                try:
+                    resume_bytes = base64.b64decode(data["resume_b64"])
+                    st.image(resume_bytes, use_container_width=True)
+                except Exception:
+                    st.error("Could not render the attached resume file.")
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +246,8 @@ init_db()
 
 if "profile" not in st.session_state:
     st.session_state["profile"] = {}
+if "resume_b64" not in st.session_state:
+    st.session_state["resume_b64"] = ""
 if "modes" not in st.session_state:
     st.session_state["modes"] = DEFAULT_MODES.copy()
 if "visibility" not in st.session_state:
@@ -245,7 +264,7 @@ tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
 )
 
 # ---------------------------------------------------------------------------
-# Tab 1: My Profile (Isolated Session State)
+# Tab 1: My Profile (Enhanced Country Code Parsing & Grid Sub-Layout)
 # ---------------------------------------------------------------------------
 with tab_profile:
     st.subheader("1. Your profile fields")
@@ -257,11 +276,62 @@ with tab_profile:
 
     cols = st.columns(2)
     new_profile = {}
+    
     for i, field in enumerate(DEFAULT_FIELDS):
         col = cols[i % 2]
-        new_profile[field] = col.text_input(
-            field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
-        )
+        
+        # SPECIAL CASE IMPLEMENTATION: Dynamic Country Code Form Factor
+        if field == "phone":
+            saved_phone = profile.get("phone", "")
+            current_code_idx = 0
+            raw_phone_num = saved_phone
+            
+            # Intelligently split existing numbers back out into dropdown and digits fields
+            for idx, (code, label) in enumerate(COUNTRY_CODES):
+                if saved_phone.startswith(code):
+                    current_code_idx = idx
+                    raw_phone_num = saved_phone[len(code):].strip()
+                    break
+            
+            with col:
+                st.markdown("<label style='font-size:14px; font-weight:500;'>Phone Number</label>", unsafe_allow_html=True)
+                p_col1, p_col2 = st.columns([2, 3])
+                
+                chosen_label = p_col1.selectbox(
+                    "Code", [c[1] for c in COUNTRY_CODES], index=current_code_idx, 
+                    key="profile_phone_code", label_visibility="collapsed"
+                )
+                # Lookup the raw dialing code character array matching our visual string selection
+                actual_code = COUNTRY_CODES[[c[1] for c in COUNTRY_CODES].index(chosen_label)][0]
+                entered_num = p_col2.text_input(
+                    "Digits", value=raw_phone_num, placeholder="555-0199",
+                    key="profile_phone_digits", label_visibility="collapsed"
+                )
+                
+                # Automatically format and pass the merged properties straight to memory
+                if entered_num.strip():
+                    new_profile["phone"] = f"{actual_code} {entered_num.strip()}"
+                else:
+                    new_profile["phone"] = ""
+        else:
+            new_profile[field] = col.text_input(
+                field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
+            )
+
+    st.markdown("##### 📁 Attach Resume Image")
+    resume_file = st.file_uploader("Upload an image of your resume (PNG, JPG)", type=["png", "jpg", "jpeg"])
+    
+    if resume_file is not None:
+        img = Image.open(resume_file)
+        img.thumbnail((400, 500))  
+        buffered = BytesIO()
+        img.save(buffered, format="JPEG", quality=60)
+        b64_string = base64.b64encode(buffered.getvalue()).decode()
+        st.session_state["resume_b64"] = b64_string
+        st.success("Resume image attached and ready for QR generation!")
+    elif st.button("Clear current resume attachment"):
+        st.session_state["resume_b64"] = ""
+        st.rerun()
 
     if st.button("Save profile settings"):
         st.session_state["profile"] = new_profile
@@ -293,6 +363,10 @@ with tab_profile:
         if checked:
             new_visible.append(field)
 
+    resume_checked = st.checkbox("Include Resume Image in this mode", value=("resume_b64" in visible_fields))
+    if resume_checked:
+        new_visible.append("resume_b64")
+
     if st.button("Save visibility configuration"):
         st.session_state["visibility"][selected_mode] = new_visible
         st.success(f"Visibility for '{selected_mode}' updated.")
@@ -303,13 +377,18 @@ with tab_profile:
 
     qr_mode = st.selectbox("Generate QR code representation", modes, key="qr_mode_select")
     preview_visible = visibility.get(qr_mode, [])
-    payload = {f: new_profile.get(f, "") for f in preview_visible if new_profile.get(f)}
+    
+    payload = {f: new_profile.get(f, "") for f in preview_visible if f in new_profile and new_profile.get(f)}
+    if "resume_b64" in preview_visible and st.session_state["resume_b64"]:
+        payload["resume_b64"] = st.session_state["resume_b64"]
+        
     payload["shared_as"] = qr_mode
 
     preview_col, qr_col = st.columns([2, 1])
     with preview_col:
         st.write("Your generated live QR content:")
-        st.json(payload)
+        display_payload = {k: (v[:30] + "..." if k == "resume_b64" else v) for k, v in payload.items()}
+        st.json(display_payload)
     with qr_col:
         img_bytes = make_qr_image_bytes(payload)
         st.image(img_bytes, caption=f"{qr_mode} mode QR code", width=220)
@@ -321,7 +400,7 @@ with tab_profile:
         )
 
 # ---------------------------------------------------------------------------
-# Tab 2: Scan & Save (Real-Time DB Sync with Safeguards)
+# Tab 2: Scan & Save
 # ---------------------------------------------------------------------------
 with tab_scan:
     st.subheader("1. Event context")
@@ -388,21 +467,28 @@ with tab_scan:
             index=default_mode_index, key="save_mode",
         )
 
-        if st.button("Save contact data", type="primary"):
-            if not name:
-                st.error("Name field required.")
-            elif not event:
-                st.error("Event context field required.")
-            elif contact_exists(name, event):
-                st.warning(f"⚠️ '{name}' is already recorded under the '{event}' group index.")
-            else:
-                save_contact(name, decoded_data, saved_mode, shared_mode, event)
-                st.session_state["current_event"] = event
-                st.success(f"Saved '{name}' globally under '{saved_mode}' card layout.")
-                st.flush = True
+        my_saved_name = st.session_state["profile"].get("name", "").strip()
+        is_self_scan = bool(my_saved_name and name.strip().lower() == my_saved_name.lower())
+
+        if is_self_scan:
+            st.error("⚠️ Self-scan restriction active. You cannot save yourself as an external network contact.")
+            st.button("Save contact data", type="primary", disabled=True)
+        else:
+            if st.button("Save contact data", type="primary"):
+                if not name:
+                    st.error("Name field required.")
+                elif not event:
+                    st.error("Event context field required.")
+                elif contact_exists(name, event):
+                    st.warning(f"⚠️ '{name}' is already recorded under the '{event}' group index.")
+                else:
+                    save_contact(name, decoded_data, saved_mode, shared_mode, event)
+                    st.session_state["current_event"] = event
+                    st.success(f"Saved '{name}' globally under '{saved_mode}' card layout.")
+                    st.rerun()
 
 # ---------------------------------------------------------------------------
-# Tab 3: My Contacts (Global Shared Visibility)
+# Tab 3: My Contacts
 # ---------------------------------------------------------------------------
 with tab_contacts:
     st.subheader("Global Synchronized Contacts")
@@ -456,7 +542,7 @@ with tab_contacts:
             st.divider()
 
 # ---------------------------------------------------------------------------
-# Tab 4: Analytics (Global Sync)
+# Tab 4: Analytics
 # ---------------------------------------------------------------------------
 with tab_analytics:
     st.subheader("Global Metric Analysis")
