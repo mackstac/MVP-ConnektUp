@@ -1,5 +1,5 @@
 """
-SmarNet - Production MVP (v3.6)
+SmarNet - Production MVP (v3.7)
 ----------------------------------------
 Optimized for GitHub Codespaces & Streamlit Cloud
 
@@ -11,6 +11,8 @@ Features included:
 5. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
 6. Strict Format Validation: Real-time validation for emails, links, and digits.
 7. Simulated Business Card Previewer: Displays true visual layout mirroring scanned records.
+8. Enforced Profile Requirements: Name and Organization status are strictly mandatory.
+9. Employment Status Toggle: Smooth UX selection for individuals seeking opportunities.
 """
 
 import base64
@@ -355,6 +357,36 @@ with tab_profile:
                 validation_errors.append("Invalid Website link")
             new_profile["website"] = val.strip()
 
+        # Dynamic Option B: Employment Status Toggle Logic for Fields Validation
+        elif field == "name":
+            new_profile[field] = col.text_input(
+                "Name *", 
+                value=profile.get(field, ""), 
+                key=f"profile_{field}",
+                placeholder="John Doe"
+            )
+        elif field == "company":
+            with col:
+                is_employed = st.checkbox("I am currently employed or affiliated with an organization", value=True, key="profile_employment_status_toggle")
+                if is_employed:
+                    new_profile[field] = st.text_input(
+                        "Company / Organization *", 
+                        value=profile.get(field, "") if profile.get(field) not in ["Seeking New Opportunities", "Freelance Consultant", "Independent", "Student"] else "", 
+                        key=f"profile_{field}_input",
+                        placeholder="e.g., Acme Corp"
+                    )
+                else:
+                    status_options = ["Seeking New Opportunities", "Freelance Consultant", "Independent", "Student"]
+                    saved_status = profile.get(field, "Seeking New Opportunities")
+                    default_status_idx = status_options.index(saved_status) if saved_status in status_options else 0
+                    
+                    new_profile[field] = st.selectbox(
+                        "Professional Status *",
+                        status_options,
+                        index=default_status_idx,
+                        key=f"profile_{field}_select"
+                    )
+
         else:
             new_profile[field] = col.text_input(
                 field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
@@ -369,7 +401,6 @@ with tab_profile:
     if resume_file is not None:
         file_ext = resume_file.name.split(".")[-1].lower()
         
-        # Explicit Format Validation Check
         if file_ext in ["pdf", "png", "jpg", "jpeg"]:
             st.session_state["resume_file_data"] = resume_file.read()
             st.session_state["resume_file_name"] = resume_file.name
@@ -388,9 +419,13 @@ with tab_profile:
             st.session_state["resume_file_type"] = ""
             st.rerun()
 
-    # Save Profile Execution Button
+    # Enforced Backend Data Object Requirement Checks
     if st.button("Save profile settings"):
-        if validation_errors:
+        if not new_profile.get("name") or not new_profile["name"].strip():
+            st.error("❌ **Name is required.** Please enter your name before saving.")
+        elif not new_profile.get("company") or not new_profile["company"].strip():
+            st.error("❌ **Company / Status is required.** Please select or enter your professional status before saving.")
+        elif validation_errors:
             st.error("❌ Cannot save profile configuration. Please correct the formatting errors highlighted above.")
         else:
             st.session_state["profile"] = new_profile
@@ -433,7 +468,6 @@ with tab_profile:
     qr_mode = st.selectbox("Generate QR code representation", modes, key="qr_mode_select")
     preview_visible = visibility.get(qr_mode, [])
     
-    # Construct thin JSON representation payload for target scanners
     payload = {f: new_profile.get(f, "") for f in preview_visible if f in new_profile and new_profile.get(f)}
     payload["shared_as"] = qr_mode
 
@@ -442,10 +476,8 @@ with tab_profile:
     with preview_col:
         st.markdown("##### 📱 Live Mockup Preview")
         st.write("This is exactly how your business card will render on the recipient's phone after they scan your QR code:")
-        # Render a structured digital card interface mock instead of technical backend database strings
         render_business_card(payload)
         
-        # Local session rendering mock for attached resume file if active
         if st.session_state["resume_file_data"]:
             with st.expander("📄 View Staged Local Resume File"):
                 if "pdf" in st.session_state["resume_file_type"]:
