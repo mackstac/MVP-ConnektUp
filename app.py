@@ -402,11 +402,21 @@ with tab_profile:
         
         if avatar_file is not None:
             avatar_img = Image.open(avatar_file)
-            avatar_img.thumbnail((150, 150))  # Strict bounding dimensions to protect payload space ceilings
+        
+            # Convert RGBA (transparent) to RGB (white background)
+            if avatar_img.mode in ("RGBA", "LA"):
+                background = Image.new("RGB", avatar_img.size, (255, 255, 255))
+                background.paste(avatar_img, mask=avatar_img.split()[-1])
+                avatar_img = background
+            else:
+                avatar_img = avatar_img.convert("RGB")
+            
+            avatar_img.thumbnail((150, 150))  
             avatar_buffered = BytesIO()
             avatar_img.save(avatar_buffered, format="JPEG", quality=70)
             st.session_state["avatar_b64"] = base64.b64encode(avatar_buffered.getvalue()).decode()
             st.success("Profile picture uploaded successfully!")
+            
         elif st.button("Clear profile picture"):
             st.session_state["avatar_b64"] = ""
             st.rerun()
@@ -417,6 +427,15 @@ with tab_profile:
         
         if resume_file is not None:
             img = Image.open(resume_file)
+            
+            # Convert RGBA (transparent) to RGB (white background)
+            if img.mode in ("RGBA", "LA"):
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[-1])
+                img = background
+            else:
+                img = img.convert("RGB")
+                
             img.thumbnail((400, 500))  
             buffered = BytesIO()
             img.save(buffered, format="JPEG", quality=60)
