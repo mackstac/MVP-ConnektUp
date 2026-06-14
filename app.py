@@ -35,7 +35,8 @@ DEFAULT_VISIBILITY = {
     "Investor": ["name", "title", "company", "email", "linkedin"],
     "Startup": ["name", "title", "company", "email", "website", "pitch"],
     "Supplier": ["name", "title", "company", "email", "phone"],
-    "Other": ["name", "company", "email"],}
+    "Other": ["name", "company", "email"],
+}
 
 def get_conn():
     return sqlite3.connect(DB_PATH)
@@ -187,7 +188,7 @@ def make_qr_image_bytes(payload: dict) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# App
+# App UI Styling Helpers
 # ---------------------------------------------------------------------------
 def render_business_card(data):
     """Transforms a raw data dictionary into a beautifully styled digital card."""
@@ -204,7 +205,7 @@ def render_business_card(data):
         shared_as = data.get("shared_as", "Contact")
         
         st.markdown(f"### 👤 {name}")
-        st.caption(f"🏷️ Scanned Tag: **{shared_as}**")
+        st.caption(f"🏷️ Shared Profile Mode: **{shared_as}**")
         st.divider()
         
         col1, col2 = st.columns(2)
@@ -232,6 +233,11 @@ def render_business_card(data):
             st.info(f"💡 **Elevator Pitch:**\n{data['pitch']}")
         if data.get("bio"):
             st.markdown(f"📝 **Bio:** *{data['bio']}*")
+
+
+# ---------------------------------------------------------------------------
+# App Execution Start
+# ---------------------------------------------------------------------------
 init_db()
 
 st.set_page_config(page_title="Networking Contact Scanner", page_icon="📱", layout="wide")
@@ -246,7 +252,7 @@ tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
 )
 
 # ---------------------------------------------------------------------------
-# Tab 1: My Profile  -> dynamic profile + per-mode visibility + live QR
+# Tab 1: My Profile
 # ---------------------------------------------------------------------------
 with tab_profile:
     st.subheader("1. Your profile fields")
@@ -329,7 +335,7 @@ with tab_profile:
         )
 
 # ---------------------------------------------------------------------------
-# Tab 2: Scan & Save  -> event context + mode switch + save
+# Tab 2: Scan & Save -> Using render_business_card() here
 # ---------------------------------------------------------------------------
 with tab_scan:
     st.subheader("1. Event context")
@@ -380,14 +386,13 @@ with tab_scan:
                 decoded_data = {"raw_text": raw}
             shared_mode = decoded_data.get("shared_as", "Unknown")
 
-            # Log each distinct scan once (avoid duplicate logs on reruns
-            # caused by other widget interactions while this image is set)
             if event and st.session_state.get("last_scanned_raw") != raw:
                 log_scan(shared_mode, event)
                 st.session_state["last_scanned_raw"] = raw
 
-            with st.expander("View scanned data", expanded=True):
-                st.json(decoded_data)
+            with st.expander("View scanned data preview", expanded=True):
+                # FIXED: Swapped out st.json for our beautiful dynamic visual cards!
+                render_business_card(decoded_data)
         else:
             st.warning("No QR code found in this image. Try again with a clearer shot.")
 
@@ -419,7 +424,7 @@ with tab_scan:
                 st.success(f"Saved '{name}' under '{saved_mode}' mode, tagged to '{event}'.")
 
 # ---------------------------------------------------------------------------
-# Tab 3: My Contacts  -> smart listing grouped by event, then mode
+# Tab 3: My Contacts -> Using render_business_card() here
 # ---------------------------------------------------------------------------
 with tab_contacts:
     st.subheader("Your contacts")
@@ -453,26 +458,24 @@ with tab_contacts:
 
         for ev in filtered["event"].unique():
             ev_df = filtered[filtered["event"] == ev]
-            st.markdown(f"### {ev} &nbsp; ({len(ev_df)})")
+            st.markdown(f"## 📍 {ev} &nbsp; ({len(ev_df)})")
 
             for mode in sorted(ev_df["saved_mode"].unique()):
                 mode_df = ev_df[ev_df["saved_mode"] == mode]
-                st.markdown(f"**{mode}**")
+                st.markdown(f"#### 🏷️ Filed as: *{mode}*")
 
                 for _, row in mode_df.iterrows():
                     data = json.loads(row["data"])
-                    with st.container(border=True):
-                        c1, c2 = st.columns([5, 1])
-                        with c1:
-                            st.write(
-                                f"**{row['name']}** &nbsp; shared as *{row['shared_mode']}* "
-                                f"&nbsp; saved {row['saved_at']}"
-                            )
-                            st.json(data)
-                        with c2:
-                            if st.button("Delete", key=f"del_{row['id']}"):
-                                delete_contact(row["id"])
-                                st.rerun()
+                    
+                    # FIXED: Swapped out raw json block for a column layout with cards and clear action metrics
+                    c1, c2 = st.columns([6, 1])
+                    with c1:
+                        render_business_card(data)
+                    with c2:
+                        st.caption(f"📅 Saved At:\n`{row['saved_at'][:10]}`")
+                        if st.button("Delete Contact", key=f"del_{row['id']}", type="secondary"):
+                            delete_contact(row["id"])
+                            st.rerun()
             st.divider()
 
 # ---------------------------------------------------------------------------
