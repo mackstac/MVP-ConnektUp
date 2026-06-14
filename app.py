@@ -1,16 +1,16 @@
 """
-SmarNet - Production MVP (v3.5)
+SmarNet - Production MVP (v3.6)
 ----------------------------------------
 Optimized for GitHub Codespaces & Streamlit Cloud
 
 Features included:
 1. International Country Codes: Compact dropdown selector with flags.
 2. Self-Scan Prevention: Blocks users from saving their own profile name.
-3. Resume Image Uploader: Encodes profile resume images directly into the QR payload.
-4. Profile Picture Uploader: Encodes compact headshots directly into the QR payload.
-5. Session-Isolated Profiles: Multi-user safe session sandboxing.
-6. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
-7. Strict Format Validation: Real-time validation for emails, links, and digits.
+3. Multi-Format Resume Uploader: Supports PDF, PNG, and JPG.
+4. Session-Isolated Profiles: Multi-user safe session sandboxing.
+5. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
+6. Strict Format Validation: Real-time validation for emails, links, and digits.
+7. Simulated Business Card Previewer: Displays true visual layout mirroring scanned records.
 """
 
 import base64
@@ -57,7 +57,7 @@ COUNTRY_CODES = [
 # ---------------------------------------------------------------------------
 def is_valid_email(email_str):
     if not email_str: 
-        return True  # Allow empty if field isn't mandatory
+        return True  
     return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email_str.strip()))
 
 def is_valid_link(link_str):
@@ -78,7 +78,6 @@ def get_conn():
 
 
 def init_db():
-    """Initializes the structural tables for global real-time synchronization."""
     conn = get_conn()
     c = conn.cursor()
     c.execute(
@@ -121,7 +120,6 @@ def save_contact(name, data, saved_mode, shared_mode, event):
 
 
 def contact_exists(name, event):
-    """Safety check: Returns True if this contact name already exists for this specific event."""
     conn = get_conn()
     c = conn.cursor()
     c.execute("SELECT 1 FROM contacts WHERE LOWER(name) = LOWER(?) AND LOWER(event) = LOWER(?)", (name, event))
@@ -224,22 +222,8 @@ def render_business_card(data):
         name = data.get("name", "Unknown Contact")
         shared_as = data.get("shared_as", "Contact")
         
-        # Render profile picture if present in the data dictionary payload
-        if data.get("avatar_b64"):
-            try:
-                avatar_bytes = base64.b64decode(data["avatar_b64"])
-                head_col1, head_col2 = st.columns([1, 5])
-                with head_col1:
-                    st.image(avatar_bytes, width=85)
-                with head_col2:
-                    st.markdown(f"### 👤 {name}")
-                    st.caption(f"🏷️ Shared Profile Mode: **{shared_as}**")
-            except Exception:
-                st.markdown(f"### 👤 {name}")
-                st.caption(f"🏷️ Shared Profile Mode: **{shared_as}**")
-        else:
-            st.markdown(f"### 👤 {name}")
-            st.caption(f"🏷️ Shared Profile Mode: **{shared_as}**")
+        st.markdown(f"### 👤 {name}")
+        st.caption(f"🏷️ Shared Profile Mode: **{shared_as}**")
             
         st.divider()
         
@@ -269,14 +253,6 @@ def render_business_card(data):
         if data.get("bio"):
             st.markdown(f"📝 **Bio:** *{data['bio']}*")
 
-        if data.get("resume_b64"):
-            with st.expander("📄 View Attached Resume Image", expanded=False):
-                try:
-                    resume_bytes = base64.b64decode(data["resume_b64"])
-                    st.image(resume_bytes, use_container_width=True)
-                except Exception:
-                    st.error("Could not render the attached resume file.")
-
 
 # ---------------------------------------------------------------------------
 # Session Sandbox Initialization
@@ -285,10 +261,12 @@ init_db()
 
 if "profile" not in st.session_state:
     st.session_state["profile"] = {}
-if "resume_b64" not in st.session_state:
-    st.session_state["resume_b64"] = ""
-if "avatar_b64" not in st.session_state:
-    st.session_state["avatar_b64"] = ""
+if "resume_file_data" not in st.session_state:
+    st.session_state["resume_file_data"] = None
+if "resume_file_name" not in st.session_state:
+    st.session_state["resume_file_name"] = ""
+if "resume_file_type" not in st.session_state:
+    st.session_state["resume_file_type"] = ""
 if "modes" not in st.session_state:
     st.session_state["modes"] = DEFAULT_MODES.copy()
 if "visibility" not in st.session_state:
@@ -305,7 +283,7 @@ tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
 )
 
 # ---------------------------------------------------------------------------
-# Tab 1: My Profile (Enhanced Country Code Parsing, Sizes & Form Validation)
+# Tab 1: My Profile
 # ---------------------------------------------------------------------------
 with tab_profile:
     st.subheader("1. Your profile fields")
@@ -317,20 +295,16 @@ with tab_profile:
 
     cols = st.columns(2)
     new_profile = {}
-    
-    # Track syntax validation anomalies before committing to database schemas
     validation_errors = []
     
     for i, field in enumerate(DEFAULT_FIELDS):
         col = cols[i % 2]
         
-        # CASE 1: Compact Custom Country Code Layout & Phone Rules
         if field == "phone":
             saved_phone = profile.get("phone", "")
             current_code_idx = 0
             raw_phone_num = saved_phone
             
-            # Intelligently split existing numbers back out into dropdown and digits fields
             for idx, (code, label) in enumerate(COUNTRY_CODES):
                 if saved_phone.startswith(code):
                     current_code_idx = idx
@@ -339,7 +313,7 @@ with tab_profile:
             
             with col:
                 st.markdown("<label style='font-size:14px; font-weight:500;'>Phone Number (Digits only)</label>", unsafe_allow_html=True)
-                p_col1, p_col2 = st.columns([1, 4])  # Adjusted layout to drastically shrink dropdown selector
+                p_col1, p_col2 = st.columns([1, 4])
                 
                 chosen_label = p_col1.selectbox(
                     "Code", [c[1] for c in COUNTRY_CODES], index=current_code_idx, 
@@ -351,7 +325,6 @@ with tab_profile:
                     key="profile_phone_digits", label_visibility="collapsed"
                 )
                 
-                # Enforce digits constraint checking
                 clean_num = entered_num.strip()
                 if clean_num:
                     if not clean_num.isdigit():
@@ -361,7 +334,6 @@ with tab_profile:
                 else:
                     new_profile["phone"] = ""
 
-        # CASE 2: Email Format Check
         elif field == "email":
             val = col.text_input("Email Address", value=profile.get("email", ""), key="profile_email")
             if val and not is_valid_email(val):
@@ -369,7 +341,6 @@ with tab_profile:
                 validation_errors.append("Invalid Email")
             new_profile["email"] = val.strip()
 
-        # CASE 3: LinkedIn Profile Check
         elif field == "linkedin":
             val = col.text_input("LinkedIn Profile URL", value=profile.get("linkedin", ""), key="profile_linkedin", placeholder="https://linkedin.com/in/username")
             if val and not is_valid_linkedin(val):
@@ -377,7 +348,6 @@ with tab_profile:
                 validation_errors.append("Invalid LinkedIn link")
             new_profile["linkedin"] = val.strip()
 
-        # CASE 4: External Website URL Check
         elif field == "website":
             val = col.text_input("Website URL", value=profile.get("website", ""), key="profile_website", placeholder="https://example.com")
             if val and not is_valid_link(val):
@@ -385,7 +355,6 @@ with tab_profile:
                 validation_errors.append("Invalid Website link")
             new_profile["website"] = val.strip()
 
-        # CASE 5: Generic inputs fallback (Name, Title, Company, Bio, Pitch)
         else:
             new_profile[field] = col.text_input(
                 field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
@@ -393,64 +362,37 @@ with tab_profile:
 
     st.divider()
     
-    # Visual Attachments Grid Section
-    img_col1, img_col2 = st.columns(2)
+    # Cleaned Attachment Section
+    st.markdown("##### 📁 Attach Resume File")
+    resume_file = st.file_uploader("Upload your resume (PDF, PNG, JPG, JPEG)", type=["pdf", "png", "jpg", "jpeg"], key="resume_uploader")
     
-    with img_col1:
-        st.markdown("##### 🖼️ Upload Profile Picture")
-        avatar_file = st.file_uploader("Upload a square headshot (PNG, JPG)", type=["png", "jpg", "jpeg"], key="avatar_uploader")
+    if resume_file is not None:
+        file_ext = resume_file.name.split(".")[-1].lower()
         
-        if avatar_file is not None:
-            avatar_img = Image.open(avatar_file)
-        
-            # Convert RGBA (transparent) to RGB (white background)
-            if avatar_img.mode in ("RGBA", "LA"):
-                background = Image.new("RGB", avatar_img.size, (255, 255, 255))
-                background.paste(avatar_img, mask=avatar_img.split()[-1])
-                avatar_img = background
-            else:
-                avatar_img = avatar_img.convert("RGB")
-            
-            avatar_img.thumbnail((150, 150))  
-            avatar_buffered = BytesIO()
-            avatar_img.save(avatar_buffered, format="JPEG", quality=70)
-            st.session_state["avatar_b64"] = base64.b64encode(avatar_buffered.getvalue()).decode()
-            st.success("Profile picture uploaded successfully!")
-            
-        elif st.button("Clear profile picture"):
-            st.session_state["avatar_b64"] = ""
+        # Explicit Format Validation Check
+        if file_ext in ["pdf", "png", "jpg", "jpeg"]:
+            st.session_state["resume_file_data"] = resume_file.read()
+            st.session_state["resume_file_name"] = resume_file.name
+            st.session_state["resume_file_type"] = resume_file.type
+            st.success(f"✔️ '{resume_file.name}' attached successfully to your session context!")
+        else:
+            st.error(f"❌ Unsupported file type format: .{file_ext.upper()}")
+            st.warning("⚠️ Please convert your document into a supported standard format (PDF, PNG, or JPG) and upload it again.")
+            st.session_state["resume_file_data"] = None
+
+    if st.session_state["resume_file_data"]:
+        st.caption(f"Currently staging: `{st.session_state['resume_file_name']}`")
+        if st.button("Clear staged resume attachment"):
+            st.session_state["resume_file_data"] = None
+            st.session_state["resume_file_name"] = ""
+            st.session_state["resume_file_type"] = ""
             st.rerun()
 
-    with img_col2:
-        st.markdown("##### 📁 Attach Resume Image")
-        resume_file = st.file_uploader("Upload an image of your resume (PNG, JPG)", type=["png", "jpg", "jpeg"])
-        
-        if resume_file is not None:
-            img = Image.open(resume_file)
-            
-            # Convert RGBA (transparent) to RGB (white background)
-            if img.mode in ("RGBA", "LA"):
-                background = Image.new("RGB", img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[-1])
-                img = background
-            else:
-                img = img.convert("RGB")
-                
-            img.thumbnail((400, 500))  
-            buffered = BytesIO()
-            img.save(buffered, format="JPEG", quality=60)
-            st.session_state["resume_b64"] = base64.b64encode(buffered.getvalue()).decode()
-            st.success("Resume image attached and ready for QR generation!")
-        elif st.button("Clear current resume attachment"):
-            st.session_state["resume_b64"] = ""
-            st.rerun()
-
-    # Block session serialization mechanics if inputs fail validation checks
+    # Save Profile Execution Button
     if st.button("Save profile settings"):
         if validation_errors:
             st.error("❌ Cannot save profile configuration. Please correct the formatting errors highlighted above.")
         else:
-            new_profile["avatar_b64"] = st.session_state["avatar_b64"]
             st.session_state["profile"] = new_profile
             st.success("Profile saved locally to your active session.")
             st.rerun()
@@ -480,10 +422,6 @@ with tab_profile:
         if checked:
             new_visible.append(field)
 
-    resume_checked = st.checkbox("Include Resume Image in this mode", value=("resume_b64" in visible_fields))
-    if resume_checked:
-        new_visible.append("resume_b64")
-
     if st.button("Save visibility configuration"):
         st.session_state["visibility"][selected_mode] = new_visible
         st.success(f"Visibility for '{selected_mode}' updated.")
@@ -495,22 +433,26 @@ with tab_profile:
     qr_mode = st.selectbox("Generate QR code representation", modes, key="qr_mode_select")
     preview_visible = visibility.get(qr_mode, [])
     
+    # Construct thin JSON representation payload for target scanners
     payload = {f: new_profile.get(f, "") for f in preview_visible if f in new_profile and new_profile.get(f)}
-    
-    if "resume_b64" in preview_visible and st.session_state["resume_b64"]:
-        payload["resume_b64"] = st.session_state["resume_b64"]
-        
-    # Inject profile pic automatically if it has been compiled into the profile layout state
-    if new_profile.get("avatar_b64"):
-        payload["avatar_b64"] = new_profile["avatar_b64"]
-        
     payload["shared_as"] = qr_mode
 
     preview_col, qr_col = st.columns([2, 1])
+    
     with preview_col:
-        st.write("Your generated live QR content:")
-        display_payload = {k: (v[:20] + "..." if k in ["resume_b64", "avatar_b64"] else v) for k, v in payload.items()}
-        st.json(display_payload)
+        st.markdown("##### 📱 Live Mockup Preview")
+        st.write("This is exactly how your business card will render on the recipient's phone after they scan your QR code:")
+        # Render a structured digital card interface mock instead of technical backend database strings
+        render_business_card(payload)
+        
+        # Local session rendering mock for attached resume file if active
+        if st.session_state["resume_file_data"]:
+            with st.expander("📄 View Staged Local Resume File"):
+                if "pdf" in st.session_state["resume_file_type"]:
+                    st.caption("PDF preview rendering is constrained here. File will download cleanly during execution operations.")
+                else:
+                    st.image(st.session_state["resume_file_data"])
+
     with qr_col:
         img_bytes = make_qr_image_bytes(payload)
         st.image(img_bytes, caption=f"{qr_mode} mode QR code", width=220)
