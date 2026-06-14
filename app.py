@@ -189,9 +189,52 @@ def make_qr_image_bytes(payload: dict) -> bytes:
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
+def render_business_card(data):
+    """Transforms a raw data dictionary into a beautifully styled digital card."""
+    if not data:
+        return
+    
+    if "raw_text" in data:
+        st.warning("⚠️ Scanned unstructured QR code text:")
+        st.code(data["raw_text"])
+        return
+
+    with st.container(border=True):
+        name = data.get("name", "Unknown Contact")
+        shared_as = data.get("shared_as", "Contact")
+        
+        st.markdown(f"### 👤 {name}")
+        st.caption(f"🏷️ Scanned Tag: **{shared_as}**")
+        st.divider()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            title = data.get("title", "")
+            company = data.get("company", "")
+            if title or company:
+                st.markdown(f"💼 **Role:** {title} at {company}" if title and company else f"💼 **Org:** {title}{company}")
+            if data.get("email"):
+                st.markdown(f"📧 **Email:** [{data['email']}](mailto:{data['email']})")
+            if data.get("phone"):
+                st.markdown(f"📞 **Phone:** `{data['phone']}`")
+        
+        with col2:
+            if data.get("linkedin"):
+                lk = str(data["linkedin"])
+                url = lk if lk.startswith(("http://", "https://")) else f"https://{lk}"
+                st.markdown(f"🔗 **LinkedIn:** [View Profile]({url})")
+            if data.get("website"):
+                web = str(data["website"])
+                url = web if web.startswith(("http://", "https://")) else f"https://{web}"
+                st.markdown(f"🌐 **Website:** [Visit Site]({url})")
+
+        if data.get("pitch"):
+            st.info(f"💡 **Elevator Pitch:**\n{data['pitch']}")
+        if data.get("bio"):
+            st.markdown(f"📝 **Bio:** *{data['bio']}*")
 init_db()
 
-st.set_page_config(page_title="Networking Contact Scanner", page_icon="\U0001F4F1", layout="wide")
+st.set_page_config(page_title="Networking Contact Scanner", page_icon="📱", layout="wide")
 st.title("SmarNet")
 st.caption(
     "Build a dynamic profile, scan contacts with event context, "
