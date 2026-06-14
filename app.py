@@ -236,6 +236,11 @@ def render_business_card(data):
                 url = web if web.startswith(("http://", "https://")) else f"https://{web}"
                 st.markdown(f"🌐 **Website:** [Visit Site]({url})")
 
+            if data.get("resume"):
+                res = str(data["resume"])
+                url = res if res.startswith(("http://", "https://")) else f"https://{res}"
+                st.markdown(f"📄 **Resume:** [View Resume Image]({url})")
+
         if data.get("pitch"):
             st.info(f"💡 **Elevator Pitch:**\n{data['pitch']}")
         if data.get("bio"):
