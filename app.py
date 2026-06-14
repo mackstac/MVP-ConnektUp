@@ -1,15 +1,14 @@
 """
-Networking Contact Scanner - MVP (v2.1)
+SmarNet - Production MVP (v3.1)
 ----------------------------------------
-New in this version:
-- Duplicate Prevention: Automatically checks if a contact name is already 
-  saved under the current event before writing to the database.
-- Dynamic profile + per-mode visibility + live QR preview.
-- Event context tracking & smart contact grouping.
-- Visual business card layouts instead of raw JSON text.
+Optimized for Deployment on share.streamlit.io
 
-Run with:
-    streamlit run app.py
+Features included:
+1. Session-Isolated Profiles: Multi-user safe (no database profile overrides).
+2. Global Database Syncing: Saved contacts and analytics sync in real-time.
+3. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
+4. VIP Resume Field Support: Render custom interactive clickable resume links.
+5. Anti-Duplicate Filter: Prevents double-saving identical names per event.
 """
 
 import json
@@ -17,12 +16,12 @@ import sqlite3
 from datetime import datetime
 from io import BytesIO
 
-import cv2
 import numpy as np
 import pandas as pd
 import qrcode
 import streamlit as st
 from PIL import Image
+from pyzbar.pyzbar import decode
 
 DB_PATH = "contacts.db"
 
@@ -40,9 +39,9 @@ def get_conn():
 
 
 def init_db():
+    """Initializes the structural tables for global real-time synchronization."""
     conn = get_conn()
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS contacts (
@@ -65,43 +64,6 @@ def init_db():
             scanned_at TEXT
         )
         """
-    )
-    conn.commit()
-
-    # Seed default settings if they don't exist yet
-    defaults = {
-        "profile": {},
-        "modes": DEFAULT_MODES,
-        "visibility": DEFAULT_VISIBILITY,
-        "current_event": "",
-        "known_events": [],
-    }
-    for key, value in defaults.items():
-        c.execute("SELECT value FROM settings WHERE key = ?", (key,))
-        if c.fetchone() is None:
-            c.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value)))
-    conn.commit()
-    conn.close()
-
-
-def get_setting(key, default=None):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = c.fetchone()
-    conn.close()
-    if row is None:
-        return default
-    return json.loads(row[0])
-
-
-def set_setting(key, value):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, json.dumps(value)),
     )
     conn.commit()
     conn.close()
@@ -169,14 +131,28 @@ def get_scan_log():
     return rows
 
 
+def get_known_events():
+    """Dynamically reads tracked event contexts straight from the global database entries."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT event FROM contacts WHERE event IS NOT NULL AND event != ''")
+    rows = c.fetchall()
+    conn.close()
+    return sorted([r[0] for r in rows])
+
+
 # ---------------------------------------------------------------------------
-# QR helpers
+# Core QR Utilities
 # ---------------------------------------------------------------------------
 def decode_qr_from_image(image: Image.Image):
-    img_array = np.array(image.convert("RGB"))
-    detector = cv2.QRCodeDetector()
-    data, points, _ = detector.detectAndDecode(img_array)
-    return data or None
+    """Upgraded scanner engine using pyzbar to accurately unpack dense matrix configurations."""
+    try:
+        decoded_objects = decode(image)
+        if decoded_objects:
+            return decoded_objects[0].data.decode("utf-8")
+    except Exception as e:
+        print(f"Scanner engine error: {e}")
+    return None
 
 
 def make_qr_image_bytes(payload: dict) -> bytes:
@@ -195,10 +171,10 @@ def make_qr_image_bytes(payload: dict) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# App UI Styling Helpers
+# App UI Layout Helpers
 # ---------------------------------------------------------------------------
 def render_business_card(data):
-    """Transforms a raw data dictionary into a beautifully styled digital card."""
+    """Transforms raw data into a clean digital business card."""
     if not data:
         return
     
@@ -235,7 +211,7 @@ def render_business_card(data):
                 web = str(data["website"])
                 url = web if web.startswith(("http://", "https://")) else f"https://{web}"
                 st.markdown(f"🌐 **Website:** [Visit Site]({url})")
-
+            # Clickable Resume Support Added Here
             if data.get("resume"):
                 res = str(data["resume"])
                 url = res if res.startswith(("http://", "https://")) else f"https://{res}"
@@ -248,31 +224,37 @@ def render_business_card(data):
 
 
 # ---------------------------------------------------------------------------
-# App Execution Start
+# Session Sandbox Initialization
 # ---------------------------------------------------------------------------
 init_db()
 
-st.set_page_config(page_title="Networking Contact Scanner", page_icon="📱", layout="wide")
+if "profile" not in st.session_state:
+    st.session_state["profile"] = {}
+if "modes" not in st.session_state:
+    st.session_state["modes"] = DEFAULT_MODES.copy()
+if "visibility" not in st.session_state:
+    st.session_state["visibility"] = DEFAULT_VISIBILITY.copy()
+if "current_event" not in st.session_state:
+    st.session_state["current_event"] = ""
+
+st.set_page_config(page_title="SmarNet Contact Manager", page_icon="📱", layout="wide")
 st.title("SmarNet")
-st.caption(
-    "Build a dynamic profile, scan contacts with event context, "
-    "and explore your network with smart filters and analytics."
-)
+st.caption("Build a dynamic profile, scan contacts with event context, and explore your network.")
 
 tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
     ["My Profile", "Scan & Save", "My Contacts", "Analytics"]
 )
 
 # ---------------------------------------------------------------------------
-# Tab 1: My Profile
+# Tab 1: My Profile (Isolated Session State)
 # ---------------------------------------------------------------------------
 with tab_profile:
     st.subheader("1. Your profile fields")
-    st.write("Fill in whatever you're comfortable sharing - you'll control what's visible per mode below.")
+    st.write("Fill in your info—this configuration is sandboxed safely to your device's browser window.")
 
-    profile = get_setting("profile", {})
-    modes = get_setting("modes", DEFAULT_MODES)
-    visibility = get_setting("visibility", DEFAULT_VISIBILITY)
+    profile = st.session_state["profile"]
+    modes = st.session_state["modes"]
+    visibility = st.session_state["visibility"]
 
     cols = st.columns(2)
     new_profile = {}
@@ -282,27 +264,22 @@ with tab_profile:
             field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
         )
 
-    if st.button("Save profile"):
-        set_setting("profile", new_profile)
-        profile = new_profile
-        st.success("Profile saved.")
+    if st.button("Save profile settings"):
+        st.session_state["profile"] = new_profile
+        st.success("Profile saved locally to your active session.")
+        st.rerun()
 
     st.divider()
     st.subheader("2. Modes and field visibility")
-    st.write("Add modes for the different ways you network, then choose which fields each mode shares.")
-
-    with st.expander("Add a new mode"):
+    
+    with st.expander("Add a custom session mode"):
         new_mode_name = st.text_input("Mode name", key="new_mode_name")
         if st.button("Add mode"):
             if new_mode_name and new_mode_name not in modes:
-                modes.append(new_mode_name)
-                visibility[new_mode_name] = ["name", "email"]
-                set_setting("modes", modes)
-                set_setting("visibility", visibility)
-                st.success(f"Added mode '{new_mode_name}'.")
+                st.session_state["modes"].append(new_mode_name)
+                st.session_state["visibility"][new_mode_name] = ["name", "email"]
+                st.success(f"Added custom mode '{new_mode_name}'.")
                 st.rerun()
-            elif new_mode_name in modes:
-                st.warning("That mode already exists.")
 
     selected_mode = st.selectbox("Configure visibility for mode", modes, key="vis_mode_select")
 
@@ -317,72 +294,63 @@ with tab_profile:
         if checked:
             new_visible.append(field)
 
-    if st.button("Save visibility for this mode"):
-        visibility[selected_mode] = new_visible
-        set_setting("visibility", visibility)
+    if st.button("Save visibility configuration"):
+        st.session_state["visibility"][selected_mode] = new_visible
         st.success(f"Visibility for '{selected_mode}' updated.")
-        visible_fields = new_visible
+        st.rerun()
 
     st.divider()
     st.subheader("3. Live QR preview")
-    st.write("This updates live as you edit your profile and visibility settings above.")
 
-    qr_mode = st.selectbox("Preview and generate QR for mode", modes, key="qr_mode_select")
+    qr_mode = st.selectbox("Generate QR code representation", modes, key="qr_mode_select")
     preview_visible = visibility.get(qr_mode, [])
     payload = {f: new_profile.get(f, "") for f in preview_visible if new_profile.get(f)}
     payload["shared_as"] = qr_mode
 
     preview_col, qr_col = st.columns([2, 1])
     with preview_col:
-        st.write("This QR code will share:")
+        st.write("Your generated live QR content:")
         st.json(payload)
     with qr_col:
         img_bytes = make_qr_image_bytes(payload)
         st.image(img_bytes, caption=f"{qr_mode} mode QR code", width=220)
         st.download_button(
-            "Download QR code",
+            "Download QR Card",
             img_bytes,
             file_name=f"{qr_mode.lower().replace(' ', '_')}_mode_qr.png",
             mime="image/png",
         )
 
 # ---------------------------------------------------------------------------
-# Tab 2: Scan & Save -> Anti-Duplicate Logic Added Here
+# Tab 2: Scan & Save (Real-Time DB Sync with Safeguards)
 # ---------------------------------------------------------------------------
 with tab_scan:
     st.subheader("1. Event context")
 
-    known_events = get_setting("known_events", [])
-    current_event = get_setting("current_event", "")
+    known_events = get_known_events()
+    current_event = st.session_state["current_event"]
 
     event_options = ["(new event)"] + known_events
     default_index = event_options.index(current_event) if current_event in event_options else 0
-    chosen_event_option = st.selectbox("Current event", event_options, index=default_index)
+    chosen_event_option = st.selectbox("Current event context", event_options, index=default_index)
 
     if chosen_event_option == "(new event)":
-        event = st.text_input(
-            "Event name", value=current_event if current_event not in known_events else ""
-        )
+        event = st.text_input("Event name", value=current_event if current_event not in known_events else "")
     else:
         event = chosen_event_option
-
-    st.caption(
-        "Every contact you save is tagged with this event, so you can later "
-        "filter 'everyone I met at X'. The last event you used is remembered as the default."
-    )
 
     st.divider()
     st.subheader("2. Capture the QR code")
 
-    source = st.radio("Image source", ["Camera", "Upload image"], horizontal=True)
+    source = st.radio("Capture Source", ["Camera Scan", "Upload File"], horizontal=True)
 
     image = None
-    if source == "Camera":
-        img_file = st.camera_input("Point your camera at the QR code")
+    if source == "Camera Scan":
+        img_file = st.camera_input("Scan partner profile")
         if img_file is not None:
             image = Image.open(img_file)
     else:
-        img_file = st.file_uploader("Upload a QR code image", type=["png", "jpg", "jpeg"])
+        img_file = st.file_uploader("Drop QR image here", type=["png", "jpg", "jpeg"])
         if img_file is not None:
             image = Image.open(img_file)
 
@@ -391,7 +359,7 @@ with tab_scan:
     if image is not None:
         raw = decode_qr_from_image(image)
         if raw:
-            st.success("QR code detected.")
+            st.success("QR Matrix unpacked successfully.")
             try:
                 decoded_data = json.loads(raw)
             except json.JSONDecodeError:
@@ -405,47 +373,44 @@ with tab_scan:
             with st.expander("View scanned data preview", expanded=True):
                 render_business_card(decoded_data)
         else:
-            st.warning("No QR code found in this image. Try again with a clearer shot.")
+            st.warning("Could not resolve tracking markers. Ensure alignment is clean and legible.")
 
     if decoded_data:
-        st.subheader("3. Save this contact")
+        st.subheader("3. Save to global list")
 
         default_name = decoded_data.get("name", "")
-        name = st.text_input("Contact name", value=default_name)
+        name = st.text_input("Assign Contact Name", value=default_name)
+        modes = st.session_state["modes"]
 
-        modes = get_setting("modes", DEFAULT_MODES)
-        st.write("Save under which mode?")
+        st.write("Save under category:")
         default_mode_index = modes.index(shared_mode) if shared_mode in modes else 0
         saved_mode = st.radio(
-            "Mode", modes, horizontal=True, label_visibility="collapsed",
+            "Mode Selector", modes, horizontal=True, label_visibility="collapsed",
             index=default_mode_index, key="save_mode",
         )
 
-        if st.button("Save contact", type="primary"):
+        if st.button("Save contact data", type="primary"):
             if not name:
-                st.error("Please enter a name before saving.")
+                st.error("Name field required.")
             elif not event:
-                st.error("Please set an event name above before saving.")
-            # NEW SCRIPT CHECK: Stops duplicates from getting created!
+                st.error("Event context field required.")
             elif contact_exists(name, event):
-                st.warning(f"⚠️ '{name}' is already in your contacts under the '{event}' event context.")
+                st.warning(f"⚠️ '{name}' is already recorded under the '{event}' group index.")
             else:
                 save_contact(name, decoded_data, saved_mode, shared_mode, event)
-                if event not in known_events:
-                    known_events.append(event)
-                    set_setting("known_events", known_events)
-                set_setting("current_event", event)
-                st.success(f"Saved '{name}' under '{saved_mode}' mode, tagged to '{event}'.")
+                st.session_state["current_event"] = event
+                st.success(f"Saved '{name}' globally under '{saved_mode}' card layout.")
+                st.flush = True
 
 # ---------------------------------------------------------------------------
-# Tab 3: My Contacts
+# Tab 3: My Contacts (Global Shared Visibility)
 # ---------------------------------------------------------------------------
 with tab_contacts:
-    st.subheader("Your contacts")
+    st.subheader("Global Synchronized Contacts")
 
     contacts = get_contacts()
     if not contacts:
-        st.info("No contacts saved yet. Go scan a QR code in the 'Scan & Save' tab.")
+        st.info("Global list empty. Scan or upload profiles to start seeding entries.")
     else:
         df = pd.DataFrame(
             contacts,
@@ -454,21 +419,21 @@ with tab_contacts:
 
         col1, col2 = st.columns(2)
         with col1:
-            events = ["All"] + sorted(df["event"].unique().tolist())
-            current_event = get_setting("current_event", "")
+            events = ["All Records"] + sorted(df["event"].unique().tolist())
+            current_event = st.session_state["current_event"]
             default_event_index = events.index(current_event) if current_event in events else 0
-            event_filter = st.selectbox("Event", events, index=default_event_index)
+            event_filter = st.selectbox("Filter Location Context", events, index=default_event_index)
         with col2:
-            mode_options = ["All"] + sorted(df["saved_mode"].unique().tolist())
-            mode_filter = st.selectbox("Mode", mode_options)
+            mode_options = ["All Records"] + sorted(df["saved_mode"].unique().tolist())
+            mode_filter = st.selectbox("Filter Assignment Mode", mode_options)
 
         filtered = df.copy()
-        if event_filter != "All":
+        if event_filter != "All Records":
             filtered = filtered[filtered["event"] == event_filter]
-        if mode_filter != "All":
+        if mode_filter != "All Records":
             filtered = filtered[filtered["saved_mode"] == mode_filter]
 
-        st.write(f"Showing {len(filtered)} of {len(df)} contact(s).")
+        st.write(f"Displaying {len(filtered)} out of {len(df)} total global records.")
 
         for ev in filtered["event"].unique():
             ev_df = filtered[filtered["event"] == ev]
@@ -476,7 +441,7 @@ with tab_contacts:
 
             for mode in sorted(ev_df["saved_mode"].unique()):
                 mode_df = ev_df[ev_df["saved_mode"] == mode]
-                st.markdown(f"#### 🏷️ Filed as: *{mode}*")
+                st.markdown(f"#### 🏷️ Group: *{mode}*")
 
                 for _, row in mode_df.iterrows():
                     data = json.loads(row["data"])
@@ -485,23 +450,23 @@ with tab_contacts:
                     with c1:
                         render_business_card(data)
                     with c2:
-                        st.caption(f"📅 Saved At:\n`{row['saved_at'][:10]}`")
-                        if st.button("Delete Contact", key=f"del_{row['id']}", type="secondary"):
+                        st.caption(f"📅 Added:\n`{row['saved_at'][:10]}`")
+                        if st.button("Remove Card", key=f"del_{row['id']}", type="secondary"):
                             delete_contact(row["id"])
                             st.rerun()
             st.divider()
 
 # ---------------------------------------------------------------------------
-# Tab 4: Analytics
+# Tab 4: Analytics (Global Sync)
 # ---------------------------------------------------------------------------
 with tab_analytics:
-    st.subheader("Network analytics")
+    st.subheader("Global Metric Analysis")
 
     contacts = get_contacts()
     scans = get_scan_log()
 
     if not contacts and not scans:
-        st.info("No data yet - scan and save some contacts to see analytics here.")
+        st.info("Metrics calculation offline until activity events are recorded.")
     else:
         df = pd.DataFrame(
             contacts,
@@ -510,21 +475,17 @@ with tab_analytics:
         scan_df = pd.DataFrame(scans, columns=["shared_mode", "event", "scanned_at"])
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Saved contacts", len(df))
-        m2.metric("Total scans", len(scan_df))
-        m3.metric("Events tracked", df["event"].nunique() if not df.empty else 0)
+        m1.metric("Synced Database Records", len(df))
+        m2.metric("Total Platform Interactions", len(scan_df))
+        m3.metric("Distinct Events Active", df["event"].nunique() if not df.empty else 0)
 
         if not df.empty:
-            st.markdown("**Contacts by mode (how you filed them)**")
+            st.markdown("**Distribution Matrix by Saved Category**")
             st.bar_chart(df["saved_mode"].value_counts())
 
-            st.markdown("**Contacts by event**")
+            st.markdown("**Distribution Matrix by Event Index**")
             st.bar_chart(df["event"].value_counts())
 
-            st.markdown("**Saves over time**")
+            st.markdown("**Platform Traction Timeline**")
             df["date"] = pd.to_datetime(df["saved_at"]).dt.date
             st.bar_chart(df.groupby("date").size())
-
-        if not scan_df.empty:
-            st.markdown("**Modes people shared with you (from scanned QR codes)**")
-            st.bar_chart(scan_df["shared_mode"].value_counts())
