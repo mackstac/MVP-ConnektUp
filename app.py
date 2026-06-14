@@ -1,15 +1,12 @@
 """
-Networking Contact Scanner - MVP (v2)
+Networking Contact Scanner - MVP (v2.1)
 ----------------------------------------
 New in this version:
-- Dynamic profile + per-mode visibility: build your profile once, choose
-  which fields are visible in each mode (Investor/Startup/Supplier/custom),
-  and get a live QR preview that updates as you change settings.
-- Event context: tag the event you're currently at; this is remembered as
-  a smart default and applied to every contact you save.
-- Smart listing: your saved contacts are grouped by event, then by mode,
-  so "everyone I met at X as an investor" is one click away.
-- Analytics: counts and trends across modes, events, and time.
+- Duplicate Prevention: Automatically checks if a contact name is already 
+  saved under the current event before writing to the database.
+- Dynamic profile + per-mode visibility + live QR preview.
+- Event context tracking & smart contact grouping.
+- Visual business card layouts instead of raw JSON text.
 
 Run with:
     streamlit run app.py
@@ -120,6 +117,16 @@ def save_contact(name, data, saved_mode, shared_mode, event):
     )
     conn.commit()
     conn.close()
+
+
+def contact_exists(name, event):
+    """Safety check: Returns True if this contact name already exists for this specific event."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM contacts WHERE LOWER(name) = LOWER(?) AND LOWER(event) = LOWER(?)", (name, event))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
 
 
 def get_contacts():
@@ -335,7 +342,7 @@ with tab_profile:
         )
 
 # ---------------------------------------------------------------------------
-# Tab 2: Scan & Save -> Using render_business_card() here
+# Tab 2: Scan & Save -> Anti-Duplicate Logic Added Here
 # ---------------------------------------------------------------------------
 with tab_scan:
     st.subheader("1. Event context")
@@ -391,7 +398,6 @@ with tab_scan:
                 st.session_state["last_scanned_raw"] = raw
 
             with st.expander("View scanned data preview", expanded=True):
-                # FIXED: Swapped out st.json for our beautiful dynamic visual cards!
                 render_business_card(decoded_data)
         else:
             st.warning("No QR code found in this image. Try again with a clearer shot.")
@@ -415,6 +421,9 @@ with tab_scan:
                 st.error("Please enter a name before saving.")
             elif not event:
                 st.error("Please set an event name above before saving.")
+            # NEW SCRIPT CHECK: Stops duplicates from getting created!
+            elif contact_exists(name, event):
+                st.warning(f"⚠️ '{name}' is already in your contacts under the '{event}' event context.")
             else:
                 save_contact(name, decoded_data, saved_mode, shared_mode, event)
                 if event not in known_events:
@@ -424,7 +433,7 @@ with tab_scan:
                 st.success(f"Saved '{name}' under '{saved_mode}' mode, tagged to '{event}'.")
 
 # ---------------------------------------------------------------------------
-# Tab 3: My Contacts -> Using render_business_card() here
+# Tab 3: My Contacts
 # ---------------------------------------------------------------------------
 with tab_contacts:
     st.subheader("Your contacts")
@@ -467,7 +476,6 @@ with tab_contacts:
                 for _, row in mode_df.iterrows():
                     data = json.loads(row["data"])
                     
-                    # FIXED: Swapped out raw json block for a column layout with cards and clear action metrics
                     c1, c2 = st.columns([6, 1])
                     with c1:
                         render_business_card(data)
