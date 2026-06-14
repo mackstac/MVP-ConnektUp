@@ -1,0 +1,3 @@
+user_id,name,email,linkedin,portfolio,resume,pitch_deck,instagram,role
+user1,Alex,alex@gmail.com,linkedin.com/alex,portfolio.com/alex,resume.pdf,pitchdeck.pdf,@alex,Founder
+user2,Sarah,sarah@gmail.com,linkedin.com/sarah,portfolio.com/sarah,resume2.pdf,pitch2.pdf,@sarah,Recruiter
