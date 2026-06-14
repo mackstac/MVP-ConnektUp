@@ -1,18 +1,20 @@
 """
-SmarNet - Production MVP (v3.3)
+SmarNet - Production MVP (v3.4)
 ----------------------------------------
 Optimized for GitHub Codespaces & Streamlit Cloud
 
 Features included:
-1. International Country Codes: Dropdown selector with flags for phone numbers.
+1. International Country Codes: Compact dropdown selector with flags.
 2. Self-Scan Prevention: Blocks users from saving their own profile name.
 3. Resume Image Uploader: Encodes profile resume images directly into the QR payload.
 4. Session-Isolated Profiles: Multi-user safe session sandboxing.
 5. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
+6. Strict Format Validation: Real-time validation for emails, links, and digits.
 """
 
 import base64
 import json
+import re
 import sqlite3
 from datetime import datetime
 from io import BytesIO
@@ -49,6 +51,27 @@ COUNTRY_CODES = [
     ("+39", "🇮🇹 +39"),
 ]
 
+# ---------------------------------------------------------------------------
+# Data Validation Helpers
+# ---------------------------------------------------------------------------
+def is_valid_email(email_str):
+    if not email_str: 
+        return True  # Allow empty if field isn't mandatory
+    return bool(re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", email_str.strip()))
+
+def is_valid_link(link_str):
+    if not link_str: 
+        return True
+    return link_str.strip().startswith(("http://", "https://"))
+
+def is_valid_linkedin(li_str):
+    if not li_str: 
+        return True
+    return "linkedin.com/" in li_str and li_str.strip().startswith(("http://", "https://"))
+
+# ---------------------------------------------------------------------------
+# Database Layer
+# ---------------------------------------------------------------------------
 def get_conn():
     return sqlite3.connect(DB_PATH)
 
@@ -264,7 +287,7 @@ tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
 )
 
 # ---------------------------------------------------------------------------
-# Tab 1: My Profile (Enhanced Country Code Parsing & Grid Sub-Layout)
+# Tab 1: My Profile (Enhanced Country Code Parsing, Sizes & Form Validation)
 # ---------------------------------------------------------------------------
 with tab_profile:
     st.subheader("1. Your profile fields")
@@ -277,10 +300,13 @@ with tab_profile:
     cols = st.columns(2)
     new_profile = {}
     
+    # Track syntax validation anomalies before committing to database schemas
+    validation_errors = []
+    
     for i, field in enumerate(DEFAULT_FIELDS):
         col = cols[i % 2]
         
-        # SPECIAL CASE IMPLEMENTATION: Dynamic Country Code Form Factor
+        # CASE 1: Compact Custom Country Code Layout & Phone Rules
         if field == "phone":
             saved_phone = profile.get("phone", "")
             current_code_idx = 0
@@ -294,8 +320,8 @@ with tab_profile:
                     break
             
             with col:
-                st.markdown("<label style='font-size:14px; font-weight:500;'>Phone Number</label>", unsafe_allow_html=True)
-                p_col1, p_col2 = st.columns([2, 3])
+                st.markdown("<label style='font-size:14px; font-weight:500;'>Phone Number (Digits only)</label>", unsafe_allow_html=True)
+                p_col1, p_col2 = st.columns([1, 4])  # Adjusted to [1, 4] layout to drastically shrink dropdown selector
                 
                 chosen_label = p_col1.selectbox(
                     "Code", [c[1] for c in COUNTRY_CODES], index=current_code_idx, 
@@ -304,15 +330,45 @@ with tab_profile:
                 # Lookup the raw dialing code character array matching our visual string selection
                 actual_code = COUNTRY_CODES[[c[1] for c in COUNTRY_CODES].index(chosen_label)][0]
                 entered_num = p_col2.text_input(
-                    "Digits", value=raw_phone_num, placeholder="555-0199",
+                    "Digits", value=raw_phone_num, placeholder="5550199",
                     key="profile_phone_digits", label_visibility="collapsed"
                 )
                 
-                # Automatically format and pass the merged properties straight to memory
-                if entered_num.strip():
-                    new_profile["phone"] = f"{actual_code} {entered_num.strip()}"
+                # Enforce digits constraint checking
+                clean_num = entered_num.strip()
+                if clean_num:
+                    if not clean_num.isdigit():
+                        st.error("⚠️ Phone field must contain digits only (no spaces, dashes, or letters).")
+                        validation_errors.append("Phone tracking string contains letters or spaces.")
+                    new_profile["phone"] = f"{actual_code} {clean_num}"
                 else:
                     new_profile["phone"] = ""
+
+        # CASE 2: Email Format Check
+        elif field == "email":
+            val = col.text_input("Email Address", value=profile.get("email", ""), key="profile_email")
+            if val and not is_valid_email(val):
+                col.error("⚠️ Invalid email layout format (e.g., name@domain.com)")
+                validation_errors.append("Invalid Email")
+            new_profile["email"] = val.strip()
+
+        # CASE 3: LinkedIn Profile Check
+        elif field == "linkedin":
+            val = col.text_input("LinkedIn Profile URL", value=profile.get("linkedin", ""), key="profile_linkedin", placeholder="https://linkedin.com/in/username")
+            if val and not is_valid_linkedin(val):
+                col.error("⚠️ LinkedIn field must be a valid link containing 'linkedin.com/'")
+                validation_errors.append("Invalid LinkedIn link")
+            new_profile["linkedin"] = val.strip()
+
+        # CASE 4: External Website URL Check
+        elif field == "website":
+            val = col.text_input("Website URL", value=profile.get("website", ""), key="profile_website", placeholder="https://example.com")
+            if val and not is_valid_link(val):
+                col.error("⚠️ Website field must be a valid link starting with http:// or https://")
+                validation_errors.append("Invalid Website link")
+            new_profile["website"] = val.strip()
+
+        # CASE 5: Generic inputs fallback (Name, Title, Company, Bio, Pitch)
         else:
             new_profile[field] = col.text_input(
                 field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
@@ -333,10 +389,14 @@ with tab_profile:
         st.session_state["resume_b64"] = ""
         st.rerun()
 
+    # Block session serialization mechanics if inputs fail layout verification
     if st.button("Save profile settings"):
-        st.session_state["profile"] = new_profile
-        st.success("Profile saved locally to your active session.")
-        st.rerun()
+        if validation_errors:
+            st.error("❌ Cannot save profile configuration. Please correct the formatting errors highlighted above.")
+        else:
+            st.session_state["profile"] = new_profile
+            st.success("Profile saved locally to your active session.")
+            st.rerun()
 
     st.divider()
     st.subheader("2. Modes and field visibility")
