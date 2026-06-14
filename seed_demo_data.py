@@ -79,7 +79,7 @@ SAMPLE_CONTACTS = [
         "email": "elon@spacex.com", 
         "linkedin": "linkedin.com/in/elon-musk", 
         "website": "spacex.com",
-        "resume": "https://www.teslarati.com/wp-content/uploads/2016/04/elon-musk-one-page-resume.jpg",
+        "resume": "https://postimg.cc/21HYXs74",
         "pitch": "Making life multiplanetary and accelerating the transition to sustainable energy.", 
         "shared_as": "Investor"
     }, "Investor", "Investor", "Tech Founders Summit", 1),
@@ -90,7 +90,7 @@ SAMPLE_CONTACTS = [
         "title": "CEO",
         "email": "sam@openai.com", 
         "website": "openai.com",
-        "resume": "https://upload.wikimedia.org/wikipedia/commons/e/ec/Sam_Altman_at_TechCrunch_Disrupt_San_Francisco_2013_%28cropped%29.jpg",
+        "resume": "https://postimg.cc/MfwgG5mg",
         "pitch": "Ensuring that artificial general intelligence benefits all of humanity.", 
         "shared_as": "Startup"
     }, "Startup", "Startup", "Tech Founders Summit", 1),
