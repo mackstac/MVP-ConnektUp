@@ -670,3 +670,20 @@ with tab_analytics:
             st.markdown("**Platform Traction Timeline**")
             df["date"] = pd.to_datetime(df["saved_at"]).dt.date
             st.bar_chart(df.groupby("date").size())
+
+# ---------------------------------------------------------------------------
+# Collapsible Admin Tooling (Add this at the very bottom of app.py)
+# ---------------------------------------------------------------------------
+st.sidebar.markdown("---")
+
+# Setting expanded=False makes this section collapsed by default
+with st.sidebar.expander("🛠️ Admin Tools (Dev Only)", expanded=False):
+    st.write("Danger Zone / Demo Controls")
+    if st.button("🌱 Load Demo Seed Data", use_container_width=True):
+        try:
+            import subprocess
+            subprocess.run(["python", "seed_demo.py"], check=True)
+            st.success("Database successfully seeded!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to seed database: {e}")
