@@ -1,5 +1,5 @@
 """
-SmarNet - Production MVP (v3.7)
+Connexa - Production MVP (v3.7)
 ----------------------------------------
 Optimized for GitHub Codespaces & Streamlit Cloud
 
@@ -276,8 +276,8 @@ if "visibility" not in st.session_state:
 if "current_event" not in st.session_state:
     st.session_state["current_event"] = ""
 
-st.set_page_config(page_title="SmarNet Contact Manager", page_icon="📱", layout="wide")
-st.title("SmarNet")
+st.set_page_config(page_title="Connexa Contact Manager", page_icon="📱", layout="wide")
+st.title("Connexa")
 st.caption("Build a dynamic profile, scan contacts with event context, and explore your network.")
 
 tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
@@ -288,7 +288,7 @@ tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
 # Tab 1: My Profile
 # ---------------------------------------------------------------------------
 with tab_profile:
-    st.subheader("1. Your profile fields")
+    st.subheader("1. Your profile configuration")
     st.write("Fill in your info—this configuration is sandboxed safely to your device's browser window.")
 
     profile = st.session_state["profile"]
@@ -587,11 +587,11 @@ with tab_scan:
 # Tab 3: My Contacts
 # ---------------------------------------------------------------------------
 with tab_contacts:
-    st.subheader("Global Synchronized Contacts")
+    st.subheader("Your contacts")
 
     contacts = get_contacts()
     if not contacts:
-        st.info("Global list empty. Scan or upload profiles to start seeding entries.")
+        st.info("Your contact list is empty. Scan or upload profiles to see new entries!")
     else:
         df = pd.DataFrame(
             contacts,
@@ -603,10 +603,10 @@ with tab_contacts:
             events = ["All Records"] + sorted(df["event"].unique().tolist())
             current_event = st.session_state["current_event"]
             default_event_index = events.index(current_event) if current_event in events else 0
-            event_filter = st.selectbox("Filter Location Context", events, index=default_event_index)
+            event_filter = st.selectbox("Filter by Location / Event", events, index=default_event_index)
         with col2:
             mode_options = ["All Records"] + sorted(df["saved_mode"].unique().tolist())
-            mode_filter = st.selectbox("Filter Assignment Mode", mode_options)
+            mode_filter = st.selectbox("Filter by Role", mode_options)
 
         filtered = df.copy()
         if event_filter != "All Records":
@@ -641,13 +641,13 @@ with tab_contacts:
 # Tab 4: Analytics
 # ---------------------------------------------------------------------------
 with tab_analytics:
-    st.subheader("Global Metric Analysis")
+    st.subheader("Your interactions so far")
 
     contacts = get_contacts()
     scans = get_scan_log()
 
     if not contacts and not scans:
-        st.info("Metrics calculation offline until activity events are recorded.")
+        st.info("You havent interacted so far, interact, and watch your metrics grow!")
     else:
         df = pd.DataFrame(
             contacts,
@@ -661,10 +661,10 @@ with tab_analytics:
         m3.metric("Distinct Events Active", df["event"].nunique() if not df.empty else 0)
 
         if not df.empty:
-            st.markdown("**Distribution Matrix by Saved Category**")
+            st.markdown("**Distribution Matrix as per Saved Category**")
             st.bar_chart(df["saved_mode"].value_counts())
 
-            st.markdown("**Distribution Matrix by Event Index**")
+            st.markdown("**Distribution Matrix as per Event**")
             st.bar_chart(df["event"].value_counts())
 
             st.markdown("**Platform Traction Timeline**")
@@ -672,18 +672,54 @@ with tab_analytics:
             st.bar_chart(df.groupby("date").size())
 
 # ---------------------------------------------------------------------------
-# Collapsible Admin Tooling (Add this at the very bottom of app.py)
+# Secure Admin Tooling (Add this at the very bottom of app.py)
 # ---------------------------------------------------------------------------
 st.sidebar.markdown("---")
 
-# Setting expanded=False makes this section collapsed by default
-with st.sidebar.expander("🛠️ Admin Tools (Dev Only)", expanded=False):
-    st.write("Danger Zone / Demo Controls")
-    if st.button("🌱 Load Demo Seed Data", use_container_width=True):
-        try:
-            import subprocess
-            subprocess.run(["python", "seed_demo_data.py"], check=True)
-            st.success("Database successfully seeded!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Failed to seed database: {e}")
+# 1. Create a collapsed password check to keep the sidebar clean
+with st.sidebar.expander("🔐 Developer Access", expanded=False):
+    admin_password = st.text_input("Enter Admin Password", type="password")
+    
+    # Grab the secret password from Streamlit's environment configuration
+    # Falls back to "admin123" for local testing in your Codespace
+    correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
+    
+    if admin_password == correct_password:
+        st.success("Access Granted")
+        st.divider()
+        st.markdown("### 🛠️ Developer Controls")
+        
+        # Action 1: Seed Data
+        if st.button("🌱 Load Demo Seed Data", use_container_width=True):
+            try:
+                import subprocess
+                subprocess.run(["python", "seed_demo.py"], check=True)
+                st.success("Database seeded successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to seed database: {e}")
+                
+        st.divider()
+        
+        # Action 2: Nuke Everything (Fresh Reset)
+        st.markdown("<span style='color:red; font-weight:bold;'>⚠️ Danger Zone</span>", unsafe_allow_html=True)
+        if st.button("💥 Nuke All Interactions & Data", use_container_width=True, type="primary"):
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                # Drop existing tables entirely
+                c.execute("DROP TABLE IF EXISTS contacts")
+                c.execute("DROP TABLE IF EXISTS scan_log")
+                conn.commit()
+                conn.close()
+                
+                # Re-run initial database structural builder to create fresh, empty tables
+                init_db()
+                
+                st.success("Database wiped! Starting fresh.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to clear database: {e}")
+    
+    elif admin_password:
+        st.error("Incorrect password.")
