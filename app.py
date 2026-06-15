@@ -682,7 +682,7 @@ with st.sidebar.expander("🛠️ Admin Tools (Dev Only)", expanded=False):
     if st.button("🌱 Load Demo Seed Data", use_container_width=True):
         try:
             import subprocess
-            subprocess.run(["python", "python_seed_demo.py"], check=True)
+            subprocess.run(["python", "seed_demo_data.py"], check=True)
             st.success("Database successfully seeded!")
             st.rerun()
         except Exception as e:
