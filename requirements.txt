@@ -1,4 +1,5 @@
 streamlit>=1.32
+streamlit-authenticator>=0.3.0
 numpy
 pillow
 qrcode[pil]
