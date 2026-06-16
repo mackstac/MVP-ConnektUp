@@ -325,7 +325,7 @@ if not st.session_state["entered_app"]:
         st.markdown("<br><br>", unsafe_allow_html=True)
         
         # Big red action button centered on the viewport
-        if st.button("Unlock Workspace Instance", type="primary", use_container_width=True):
+        if st.button("Unlock and get started!", type="primary", use_container_width=True):
             st.session_state["entered_app"] = True
             st.rerun()
 
