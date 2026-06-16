@@ -603,6 +603,7 @@ else:
                 if event and st.session_state.get("last_scanned_raw") != raw:
                     log_scan(shared_mode, event)
                     st.session_state["last_scanned_raw"] = raw
+                    st.rerun()
 
                 with st.expander("View scanned data preview", expanded=True):
                     render_business_card(decoded_data)
