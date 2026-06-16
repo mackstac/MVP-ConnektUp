@@ -14,6 +14,7 @@ Re-running this script adds another copy of the sample contacts - delete
 contacts.db first if you want a clean reset.
 """
 
+import sys
 import json
 import sqlite3
 from datetime import datetime, timedelta
@@ -104,11 +105,21 @@ def get_conn():
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            name TEXT,
+            password_hash TEXT,
+            email TEXT
+        )
+        """
+    )
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS contacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
             name TEXT,
             data TEXT,
             saved_mode TEXT,
@@ -122,6 +133,7 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS scan_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
             shared_mode TEXT,
             event TEXT,
             scanned_at TEXT
@@ -132,47 +144,43 @@ def init_db():
     conn.close()
 
 
-def set_setting(key, value):
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, json.dumps(value)),
-    )
-    conn.commit()
-    conn.close()
-
-
-def seed():
+def seed(target_username):
     init_db()
-
-    set_setting("profile", SAMPLE_PROFILE)
-    set_setting("modes", DEFAULT_MODES)
-    set_setting("visibility", DEFAULT_VISIBILITY)
-    set_setting("current_event", "Tech Founders Summit")
-    # Added "Tech Founders Summit" to known events array below
-    set_setting("known_events", ["Demo Day 2026", "Founder Meetup - March", "Tech Founders Summit"])
 
     conn = get_conn()
     c = conn.cursor()
 
     for name, data, saved_mode, shared_mode, event, days_ago in SAMPLE_CONTACTS:
         ts = (datetime.now() - timedelta(days=days_ago)).isoformat(timespec="seconds")
+        
+        # Inserts contacts bound specifically to the authenticated user partition
         c.execute(
-            "INSERT INTO contacts (name, data, saved_mode, shared_mode, event, saved_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (name, json.dumps(data), saved_mode, shared_mode, event, ts),
+            """
+            INSERT INTO contacts (username, name, data, saved_mode, shared_mode, event, saved_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (target_username, name, json.dumps(data), saved_mode, shared_mode, event, ts),
         )
+        
+        # Logs interaction history bound specifically to the authenticated user partition
         c.execute(
-            "INSERT INTO scan_log (shared_mode, event, scanned_at) VALUES (?, ?, ?)",
-            (shared_mode, event, ts),
+            """
+            INSERT INTO scan_log (username, shared_mode, event, scanned_at) 
+            VALUES (?, ?, ?, ?)
+            """,
+            (target_username, shared_mode, event, ts),
         )
 
     conn.commit()
     conn.close()
-    print(f"Seeded {len(SAMPLE_CONTACTS)} sample contacts and scan log entries into {DB_PATH}.")
+    print(f"Seeded {len(SAMPLE_CONTACTS)} sample contacts and scan log entries into {DB_PATH} for user @{target_username}.")
 
 
 if __name__ == "__main__":
-    seed()
+    # Check if a specific user context was passed via app.py's developer switch
+    if len(sys.argv) > 1:
+        user_context_arg = sys.argv[1].strip().lower()
+    else:
+        user_context_arg = "admin"
+        
+    seed(user_context_arg)
