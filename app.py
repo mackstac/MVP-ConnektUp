@@ -1,17 +1,21 @@
 """
-Connexa - Production MVP (v6.0)
+Connexa - Production MVP (v5.3)
 ----------------------------------------
+Optimized for Mobile, Laptop Trackpads, & Streamlit Cloud
+
 Features included:
-1. Multi-User Authentication: Streamlit-Authenticator framework layer.
-2. Isolated Database Schema: Rows are bound strictly to user sessions.
-3. Local vs Global Purge: Clear individual user rows or wipe structural assets.
-4. Auto-Isolated Demo Injection: Passes active user tags to seed utilities.
-5. International Country Codes: Compact dropdown selector.
-6. Self-Scan Prevention: Blocks users from saving their own profile name.
-7. Multi-Format Resume Uploader: Supports PDF, PNG, and JPG.
-8. Pyzbar QR Scanner Engine: Decodes dense QR images instantly.
-9. Responsive Typography: HTML/CSS clamp structures tailored for Dark Mode.
-10. Clean UI Defaults: Left sidebar panel collapsed by default on launch.
+1. International Country Codes: Compact dropdown selector.
+2. Self-Scan Prevention: Blocks users from saving their own profile name.
+3. Multi-Format Resume Uploader: Supports PDF, PNG, and JPG.
+4. Session-Isolated Profiles: Multi-user safe session sandboxing.
+5. Pyzbar QR Scanner Engine: Decodes highly dense QR images instantly.
+6. Strict Format Validation: Real-time validation for emails, links, and digits.
+7. Simulated Business Card Previewer: Displays true visual layout mirroring scanned records.
+8. Enforced Profile Requirements: Name and Organization status are strictly mandatory.
+9. Employment Status Toggle: UX selection for individuals seeking opportunities.
+10. Dark-Mode Optimization: High-contrast typography designed specifically for dark UI contexts.
+11. Responsive Typography: Uses CSS clamp() to gracefully resize text on mobile devices.
+12. Clean UI Defaults: Left sidebar panel collapsed by default on initial launch.
 """
 
 import base64
@@ -24,7 +28,7 @@ from io import BytesIO
 import pandas as pd
 import qrcode
 import streamlit as st
-import streamlit_authenticator as stauth
+import streamlit.components.v1 as components
 from PIL import Image
 from pyzbar.pyzbar import decode
 
@@ -39,6 +43,7 @@ DEFAULT_VISIBILITY = {
     "Other": ["name", "company", "email"],
 }
 
+# Supported international country dialing configurations
 COUNTRY_CODES = [
     ("+1", "US/CA +1"),
     ("+44", "UK +44"),
@@ -72,7 +77,7 @@ def is_valid_linkedin(li_str):
     return "linkedin.com/" in li_str and li_str.strip().startswith(("http://", "https://"))
 
 # ---------------------------------------------------------------------------
-# Database Layer (User-Isolated Schema Architecture)
+# Database Layer
 # ---------------------------------------------------------------------------
 def get_conn():
     return sqlite3.connect(DB_PATH)
@@ -83,19 +88,8 @@ def init_db():
     c = conn.cursor()
     c.execute(
         """
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            name TEXT,
-            password_hash TEXT,
-            email TEXT
-        )
-        """
-    )
-    c.execute(
-        """
         CREATE TABLE IF NOT EXISTS contacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT,
             name TEXT,
             data TEXT,
             saved_mode TEXT,
@@ -109,7 +103,6 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS scan_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT,
             shared_mode TEXT,
             event TEXT,
             scanned_at TEXT
@@ -120,37 +113,33 @@ def init_db():
     conn.close()
 
 
-def save_contact(username, name, data, saved_mode, shared_mode, event):
+def save_contact(name, data, saved_mode, shared_mode, event):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO contacts (username, name, data, saved_mode, shared_mode, event, saved_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (username, name, json.dumps(data), saved_mode, shared_mode, event, datetime.now().isoformat(timespec="seconds")),
+        "INSERT INTO contacts (name, data, saved_mode, shared_mode, event, saved_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (name, json.dumps(data), saved_mode, shared_mode, event, datetime.now().isoformat(timespec="seconds")),
     )
     conn.commit()
     conn.close()
 
 
-def contact_exists(username, name, event):
+def contact_exists(name, event):
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        "SELECT 1 FROM contacts WHERE LOWER(username) = LOWER(?) AND LOWER(name) = LOWER(?) AND LOWER(event) = LOWER(?)", 
-        (username, name, event)
-    )
+    c.execute("SELECT 1 FROM contacts WHERE LOWER(name) = LOWER(?) AND LOWER(event) = LOWER(?)", (name, event))
     row = c.fetchone()
     conn.close()
     return row is not None
 
 
-def get_contacts(username):
+def get_contacts():
     conn = get_conn()
     c = conn.cursor()
     c.execute(
         "SELECT id, name, data, saved_mode, shared_mode, event, saved_at "
-        "FROM contacts WHERE LOWER(username) = LOWER(?) ORDER BY saved_at DESC", 
-        (username,)
+        "FROM contacts ORDER BY saved_at DESC"
     )
     rows = c.fetchall()
     conn.close()
@@ -165,77 +154,33 @@ def delete_contact(contact_id):
     conn.close()
 
 
-def log_scan(username, shared_mode, event):
+def log_scan(shared_mode, event):
     conn = get_conn()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO scan_log (username, shared_mode, event, scanned_at) VALUES (?, ?, ?, ?)",
-        (username, shared_mode, event, datetime.now().isoformat(timespec="seconds")),
+        "INSERT INTO scan_log (shared_mode, event, scanned_at) VALUES (?, ?, ?)",
+        (shared_mode, event, datetime.now().isoformat(timespec="seconds")),
     )
     conn.commit()
     conn.close()
 
 
-def get_scan_log(username):
+def get_scan_log():
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        "SELECT shared_mode, event, scanned_at FROM scan_log WHERE LOWER(username) = LOWER(?) ORDER BY scanned_at", 
-        (username,)
-    )
+    c.execute("SELECT shared_mode, event, scanned_at FROM scan_log ORDER BY scanned_at")
     rows = c.fetchall()
     conn.close()
     return rows
 
 
-def get_known_events(username):
+def get_known_events():
     conn = get_conn()
     c = conn.cursor()
-    c.execute(
-        "SELECT DISTINCT event FROM contacts WHERE LOWER(username) = LOWER(?) AND event IS NOT NULL AND event != ''", 
-        (username,)
-    )
+    c.execute("SELECT DISTINCT event FROM contacts WHERE event IS NOT NULL AND event != ''")
     rows = c.fetchall()
     conn.close()
     return sorted([r[0] for r in rows])
-
-
-# ---------------------------------------------------------------------------
-# Authentication Utilities
-# ---------------------------------------------------------------------------
-def load_authenticator_config():
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("SELECT username, name, password_hash, email FROM users")
-    rows = c.fetchall()
-    conn.close()
-    
-    config = {"credentials": {"usernames": {}}}
-    for username, name, p_hash, email in rows:
-        config["credentials"]["usernames"][username] = {
-            "name": name,
-            "password": p_hash,
-            "email": email
-        }
-    config["cookie"] = {"name": "connexa_cookie", "key": "connexa_signature_key", "expiry_days": 30}
-    return config
-
-
-def register_new_user(username, name, plain_password, email):
-    conn = get_conn()
-    c = conn.cursor()
-    try:
-        hashed_password = stauth.Hasher([plain_password]).generate()[0]
-        c.execute(
-            "INSERT INTO users (username, name, password_hash, email) VALUES (?, ?, ?, ?)", 
-            (username.strip().lower(), name, hashed_password, email)
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except sqlite3.IntegrityError:
-        conn.close()
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +191,8 @@ def decode_qr_from_image(image: Image.Image):
         decoded_objects = decode(image)
         if decoded_objects:
             return decoded_objects[0].data.decode("utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Scanner engine error: {e}")
     return None
 
 
@@ -270,6 +215,7 @@ def make_qr_image_bytes(payload: dict) -> bytes:
 # App UI Layout Helpers
 # ---------------------------------------------------------------------------
 def render_business_card(data):
+    """Transforms raw data into a clean digital business card."""
     if not data:
         return
     
@@ -284,6 +230,7 @@ def render_business_card(data):
         
         st.markdown(f"### {name}")
         st.caption(f"Shared Profile Mode: **{shared_as}**")
+            
         st.divider()
         
         col1, col2 = st.columns(2)
@@ -314,7 +261,7 @@ def render_business_card(data):
 
 
 # ---------------------------------------------------------------------------
-# Session Sandbox & Security Gateway Initialization
+# Session Sandbox & App Setup
 # ---------------------------------------------------------------------------
 init_db()
 
@@ -324,89 +271,77 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-auth_config = load_authenticator_config()
-authenticator = stauth.Authenticate(
-    auth_config["credentials"],
-    auth_config["cookie"]["name"],
-    auth_config["cookie"]["key"],
-    auth_config["cookie"]["expiry_days"]
-)
+if "entered_app" not in st.session_state:
+    st.session_state["entered_app"] = False
+if "profile" not in st.session_state:
+    st.session_state["profile"] = {}
+if "resume_file_data" not in st.session_state:
+    st.session_state["resume_file_data"] = None
+if "resume_file_name" not in st.session_state:
+    st.session_state["resume_file_name"] = ""
+if "resume_file_type" not in st.session_state:
+    st.session_state["resume_file_type"] = ""
+if "modes" not in st.session_state:
+    st.session_state["modes"] = DEFAULT_MODES.copy()
+if "visibility" not in st.session_state:
+    st.session_state["visibility"] = DEFAULT_VISIBILITY.copy()
+if "current_event" not in st.session_state:
+    st.session_state["current_event"] = ""
 
 # ===========================================================================
-# STAGE 1: GATEWAY VERIFICATION SECURITY WALL
+# VIEW 1: LANDING PAGE
 # ===========================================================================
-if not st.session_state.get("authentication_status"):
+if not st.session_state["entered_app"]:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    col_l, col_c, col_r = st.columns([1, 2, 1])
     
-    with col_c:
+    col_left, col_center, col_right = st.columns([1, 3, 1])
+    
+    with col_center:
         st.markdown(
             """
-            <div style="text-align: center; margin-bottom: 25px;">
-                <h1 style="font-size: 3rem; font-weight: 800; color: #FFFFFF; letter-spacing: -1px; margin-bottom: 5px;">Connexa</h1>
-                <p style="font-size: 1.15rem; color: #E0E0E0; font-weight: 500;">Your personal event networking accelerator.</p>
+            <div style="text-align: center; margin-bottom: 40px;">
+                <h1 style="font-size: 3.5rem; font-weight: 800; color: #FFFFFF; letter-spacing: -1px; margin-bottom: 15px;">Connexa</h1>
+                <p style="font-size: 1.35rem; color: #E0E0E0; max-width: 600px; margin: 0 auto; line-height: 1.6; font-weight: 500;">
+                    Your personal event networking accelerator.
+                </p>
             </div>
             """, 
             unsafe_allow_html=True
         )
         
-        auth_tab, reg_tab = st.tabs(["Sign In to Suite", "Create Private Account"])
+        st.divider()
         
-        with auth_tab:
-            authenticator.login('main')
-            if st.session_state["authentication_status"] is False:
-                st.error("Username/password combination is incorrect.")
-                
-        with reg_tab:
-            with st.form("Registration Form Engine"):
-                st.markdown("#### Dynamic Registration Profile Setup")
-                reg_user = st.text_input("Choose unique username (lowercase, alphanumeric names only)").strip().lower()
-                reg_name = st.text_input("Your Full Display Name (e.g. John Doe)")
-                reg_email = st.text_input("Email Address Address")
-                reg_pass = st.text_input("Secure Account Password", type="password")
-                submit_reg = st.form_submit_button("Register Account Details", use_container_width=True)
-                
-                if submit_reg:
-                    if not reg_user or not reg_pass or not reg_name:
-                        st.error("All structural initialization parameter boxes require valid values.")
-                    elif not re.match(r"^[a-zA-Z0-9_]+$", reg_user):
-                        st.error("User ID names may only use simple letters, numbers, and underscore tracking traits.")
-                    else:
-                        if register_new_user(reg_user, reg_name, reg_pass, reg_email):
-                            st.success("Account committed perfectly! Switch over to the Sign In tab to enter.")
-                        else:
-                            st.error("That target username signature is already checked out by an active user pool link.")
+        feat_col1, feat_col2, feat_col3 = st.columns(3)
+        with feat_col1:
+            st.markdown("### Matrix Scanning")
+            st.caption("Instantly decode professional QR profiles via your camera or through QR uploading.")
+        with feat_col2:
+            st.markdown("### Local Storage")
+            st.caption("All parameters are committed to an isolated local database configuration, maintaining complete network privacy.")
+        with feat_col3:
+            st.markdown("### Interaction Metrics")
+            st.caption("Review network performance matrices using integrated analytics, chronological timelines, and classification distribution charts.")
+        
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # Big red action button centered on the viewport
+        if st.button("Unlock and get started", type="primary", use_container_width=True):
+            st.session_state["entered_app"] = True
+            st.rerun()
 
 # ===========================================================================
-# STAGE 2: SECURED MAIN SYSTEM WORKSPACE
+# VIEW 2: MAIN SUITE WORKSPACE
 # ===========================================================================
 else:
-    current_user = st.session_state["username"]
-    display_name = st.session_state["name"]
-
-    bc1, bc2 = st.columns([10, 2])
-    with bc1:
-        st.title("Connexa Workspace")
-        st.caption(f"Secure Node Sandbox: **{display_name}** (`@{current_user}`)")
+    # Minimalist utility header to navigate away from the workspace
+    bc1, bc2 = st.columns([11, 1])
     with bc2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        authenticator.logout("Exit System", "main")
+        if st.button("Log Out", use_container_width=True, type="secondary"):
+            st.session_state["entered_app"] = False
+            st.rerun()
 
-    # Establish sandboxed operational memory
-    if "profile" not in st.session_state:
-        st.session_state["profile"] = {"name": display_name}
-    if "resume_file_data" not in st.session_state:
-        st.session_state["resume_file_data"] = None
-    if "resume_file_name" not in st.session_state:
-        st.session_state["resume_file_name"] = ""
-    if "resume_file_type" not in st.session_state:
-        st.session_state["resume_file_type"] = ""
-    if "modes" not in st.session_state:
-        st.session_state["modes"] = DEFAULT_MODES.copy()
-    if "visibility" not in st.session_state:
-        st.session_state["visibility"] = DEFAULT_VISIBILITY.copy()
-    if "current_event" not in st.session_state:
-        st.session_state["current_event"] = ""
+    st.title("Connexa Workspace")
+    st.caption("Build a professional profile, scan contacts with event context, and review interaction analytics.")
 
     tab_profile, tab_scan, tab_contacts, tab_analytics = st.tabs(
         ["My Profile", "Scan & Save", "My Contacts", "Analytics"]
@@ -417,6 +352,8 @@ else:
     # ---------------------------------------------------------------------------
     with tab_profile:
         st.subheader("1. Profile Configuration")
+        st.write("Fill in your information. Settings are securely sandboxed to the local device browser window.")
+
         profile = st.session_state["profile"]
         modes = st.session_state["modes"]
         visibility = st.session_state["visibility"]
@@ -456,8 +393,8 @@ else:
                     clean_num = entered_num.strip()
                     if clean_num:
                         if not clean_num.isdigit():
-                            st.error("Phone field must contain digits only.")
-                            validation_errors.append("Phone tracking string invalid.")
+                            st.error("Phone field must contain digits only (no spaces, dashes, or letters).")
+                            validation_errors.append("Phone tracking string contains letters or spaces.")
                         new_profile["phone"] = f"{actual_code} {clean_num}"
                     else:
                         new_profile["phone"] = ""
@@ -465,26 +402,31 @@ else:
             elif field == "email":
                 val = col.text_input("Email Address", value=profile.get("email", ""), key="profile_email")
                 if val and not is_valid_email(val):
-                    col.error("Invalid email format.")
+                    col.error("Invalid email layout format (e.g., name@domain.com)")
                     validation_errors.append("Invalid Email")
                 new_profile["email"] = val.strip()
 
             elif field == "linkedin":
-                val = col.text_input("LinkedIn Profile URL", value=profile.get("linkedin", ""), key="profile_linkedin")
+                val = col.text_input("LinkedIn Profile URL", value=profile.get("linkedin", ""), key="profile_linkedin", placeholder="https://linkedin.com/in/username")
                 if val and not is_valid_linkedin(val):
-                    col.error("LinkedIn URL must contain 'linkedin.com/'")
+                    col.error("LinkedIn field must be a valid link containing 'linkedin.com/'")
                     validation_errors.append("Invalid LinkedIn link")
                 new_profile["linkedin"] = val.strip()
 
             elif field == "website":
-                val = col.text_input("Website URL", value=profile.get("website", ""), key="profile_website")
+                val = col.text_input("Website URL", value=profile.get("website", ""), key="profile_website", placeholder="https://example.com")
                 if val and not is_valid_link(val):
-                    col.error("Website link must start with http:// or https://")
+                    col.error("Website field must be a valid link starting with http:// or https://")
                     validation_errors.append("Invalid Website link")
                 new_profile["website"] = val.strip()
 
             elif field == "name":
-                new_profile[field] = col.text_input("Name *", value=profile.get(field, display_name), key=f"profile_{field}")
+                new_profile[field] = col.text_input(
+                    "Name *", 
+                    value=profile.get(field, ""), 
+                    key=f"profile_{field}",
+                    placeholder="John Doe"
+                )
             elif field == "company":
                 with col:
                     is_employed = st.checkbox("Currently affiliated with an organization", value=True, key="profile_employment_status_toggle")
@@ -492,49 +434,69 @@ else:
                         new_profile[field] = st.text_input(
                             "Company / Organization *", 
                             value=profile.get(field, "") if profile.get(field) not in ["Seeking New Opportunities", "Freelance Consultant", "Independent", "Student"] else "", 
-                            key=f"profile_{field}_input"
+                            key=f"profile_{field}_input",
+                            placeholder="e.g., Acme Corp"
                         )
                     else:
                         status_options = ["Seeking New Opportunities", "Freelance Consultant", "Independent", "Student"]
                         saved_status = profile.get(field, "Seeking New Opportunities")
                         default_status_idx = status_options.index(saved_status) if saved_status in status_options else 0
-                        new_profile[field] = st.selectbox("Professional Status *", status_options, index=default_status_idx, key=f"profile_{field}_select")
+                        
+                        new_profile[field] = st.selectbox(
+                            "Professional Status *",
+                            status_options,
+                            index=default_status_idx,
+                            key=f"profile_{field}_select"
+                        )
+
             else:
-                new_profile[field] = col.text_input(field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}")
+                new_profile[field] = col.text_input(
+                    field.capitalize(), value=profile.get(field, ""), key=f"profile_{field}"
+                )
 
         st.divider()
+        
         st.markdown("##### Attach Resume File")
-        resume_file = st.file_uploader("Upload resume (PDF, PNG, JPG)", type=["pdf", "png", "jpg", "jpeg"])
+        resume_file = st.file_uploader("Upload resume (PDF, PNG, JPG, JPEG)", type=["pdf", "png", "jpg", "jpeg"], key="resume_uploader")
         
         if resume_file is not None:
-            st.session_state["resume_file_data"] = resume_file.read()
-            st.session_state["resume_file_name"] = resume_file.name
-            st.session_state["resume_file_type"] = resume_file.type
-            st.success(f"File '{resume_file.name}' attached successfully.")
+            file_ext = resume_file.name.split(".")[-1].lower()
+            
+            if file_ext in ["pdf", "png", "jpg", "jpeg"]:
+                st.session_state["resume_file_data"] = resume_file.read()
+                st.session_state["resume_file_name"] = resume_file.name
+                st.session_state["resume_file_type"] = resume_file.type
+                st.success(f"File '{resume_file.name}' attached successfully to session context.")
+            else:
+                st.error(f"Unsupported file format: .{file_ext.upper()}")
+                st.warning("Convert document into a supported standard format (PDF, PNG, or JPG) and upload again.")
+                st.session_state["resume_file_data"] = None
 
-        if st.session_state["resume_file_data"] and st.button("Clear staged resume attachment"):
-            st.session_state["resume_file_data"] = None
-            st.session_state["resume_file_name"] = ""
-            st.session_state["resume_file_type"] = ""
-            st.rerun()
+        if st.session_state["resume_file_data"]:
+            st.caption(f"Staged file: `{st.session_state['resume_file_name']}`")
+            if st.button("Clear staged resume attachment"):
+                st.session_state["resume_file_data"] = None
+                st.session_state["resume_file_name"] = ""
+                st.session_state["resume_file_type"] = ""
+                st.rerun()
 
         if st.button("Save Profile Settings"):
             if not new_profile.get("name") or not new_profile["name"].strip():
-                st.error("Name is required.")
+                st.error("Name is required. Enter name details before saving.")
             elif not new_profile.get("company") or not new_profile["company"].strip():
-                st.error("Company / Status field value is required.")
+                st.error("Company / Status is required. Select or enter status before saving.")
             elif validation_errors:
-                st.error("Fix form styling errors before updating.")
+                st.error("Cannot save configuration. Correct formatting highlights before proceeding.")
             else:
                 st.session_state["profile"] = new_profile
-                st.success("Profile saved locally to current user partition.")
+                st.success("Profile saved locally to current session.")
                 st.rerun()
 
         st.divider()
         st.subheader("2. Modes and Field Visibility")
         
         with st.expander("Add Custom Session Mode"):
-            new_mode_name = st.text_input("Mode name")
+            new_mode_name = st.text_input("Mode name", key="new_mode_name")
             if st.button("Add Mode"):
                 if new_mode_name and new_mode_name not in modes:
                     st.session_state["modes"].append(new_mode_name)
@@ -542,13 +504,17 @@ else:
                     st.success(f"Added custom mode '{new_mode_name}'.")
                     st.rerun()
 
-        selected_mode = st.selectbox("Configure visibility for mode", modes)
+        selected_mode = st.selectbox("Configure visibility for mode", modes, key="vis_mode_select")
+
         visible_fields = visibility.get(selected_mode, [])
         new_visible = []
         vis_cols = st.columns(3)
         for i, field in enumerate(DEFAULT_FIELDS):
             col = vis_cols[i % 3]
-            if col.checkbox(field.capitalize(), value=(field in visible_fields), key=f"vis_{selected_mode}_{field}"):
+            checked = col.checkbox(
+                field.capitalize(), value=(field in visible_fields), key=f"vis_{selected_mode}_{field}"
+            )
+            if checked:
                 new_visible.append(field)
 
         if st.button("Save Visibility Configuration"):
@@ -558,48 +524,68 @@ else:
 
         st.divider()
         st.subheader("3. Live QR Preview")
-        qr_mode = st.selectbox("Generate QR code representation", modes)
+
+        qr_mode = st.selectbox("Generate QR code representation", modes, key="qr_mode_select")
         preview_visible = visibility.get(qr_mode, [])
         
         payload = {f: new_profile.get(f, "") for f in preview_visible if f in new_profile and new_profile.get(f)}
         payload["shared_as"] = qr_mode
 
         preview_col, qr_col = st.columns([2, 1])
+        
         with preview_col:
             st.markdown("##### Digital Card Preview")
+            st.write("Layout rendered to recipient devices following matrix scan sequence:")
             render_business_card(payload)
+            
+            if st.session_state["resume_file_data"]:
+                with st.expander("View Staged Local Resume File"):
+                    if "pdf" in st.session_state["resume_file_type"]:
+                        st.caption("PDF preview rendering constrained in this sub-frame. Downloads function normally.")
+                    else:
+                        st.image(st.session_state["resume_file_data"])
 
         with qr_col:
             img_bytes = make_qr_image_bytes(payload)
-            st.image(img_bytes, caption=f"{qr_mode} mode QR", width=220)
-            st.download_button("Download QR Card", img_bytes, file_name=f"{qr_mode.lower().replace(' ', '_')}_qr.png", mime="image/png")
+            st.image(img_bytes, caption=f"{qr_mode} mode QR code", width=220)
+            st.download_button(
+                "Download QR Card",
+                img_bytes,
+                file_name=f"{qr_mode.lower().replace(' ', '_')}_mode_qr.png",
+                mime="image/png",
+                )
 
     # ---------------------------------------------------------------------------
     # Tab 2: Scan & Save
     # ---------------------------------------------------------------------------
     with tab_scan:
         st.subheader("1. Event Context")
-        known_events = get_known_events(current_user)
+
+        known_events = get_known_events()
         current_event = st.session_state["current_event"]
 
         event_options = ["(new event)"] + known_events
         default_index = event_options.index(current_event) if current_event in event_options else 0
         chosen_event_option = st.selectbox("Current event context", event_options, index=default_index)
 
-        event = st.text_input("Event name", value=current_event if current_event not in known_events else "") if chosen_event_option == "(new event)" else chosen_event_option
+        if chosen_event_option == "(new event)":
+            event = st.text_input("Event name", value=current_event if current_event not in known_events else "")
+        else:
+            event = chosen_event_option
 
         st.divider()
         st.subheader("2. Capture QR Code")
+
         source = st.radio("Capture Source", ["Camera Scan", "Upload File"], horizontal=True)
 
         image = None
         if source == "Camera Scan":
             img_file = st.camera_input("Scan partner profile")
-            if img_file is not None: 
+            if img_file is not None:
                 image = Image.open(img_file)
         else:
             img_file = st.file_uploader("Drop QR image here", type=["png", "jpg", "jpeg"])
-            if img_file is not None: 
+            if img_file is not None:
                 image = Image.open(img_file)
 
         decoded_data = None
@@ -615,78 +601,99 @@ else:
                 shared_mode = decoded_data.get("shared_as", "Unknown")
 
                 if event and st.session_state.get("last_scanned_raw") != raw:
-                    log_scan(current_user, shared_mode, event)
+                    log_scan(shared_mode, event)
                     st.session_state["last_scanned_raw"] = raw
                     st.rerun()
 
                 with st.expander("View scanned data preview", expanded=True):
                     render_business_card(decoded_data)
             else:
-                st.warning("Could not resolve tracking markers.")
+                st.warning("Could not resolve tracking markers. Verify alignment and clarity.")
 
         if decoded_data:
             st.subheader("3. Save to Directory")
-            name = st.text_input("Assign Contact Name", value=decoded_data.get("name", ""))
-            
-            saved_mode = st.radio("Save under category role:", modes, horizontal=True, index=modes.index(shared_mode) if shared_mode in modes else 0)
+
+            default_name = decoded_data.get("name", "")
+            name = st.text_input("Assign Contact Name", value=default_name)
+            modes = st.session_state["modes"]
+
+            st.write("Save under category:")
+            default_mode_index = modes.index(shared_mode) if shared_mode in modes else 0
+            saved_mode = st.radio(
+                "Mode Selector", modes, horizontal=True, label_visibility="collapsed",
+                index=default_mode_index, key="save_mode",
+            )
 
             my_saved_name = st.session_state["profile"].get("name", "").strip()
-            if my_saved_name and name.strip().lower() == my_saved_name.lower():
-                st.error("Self-scan restriction active. Cannot commit local profile registration into your own contact tree.")
-                st.button("Save contact data", disabled=True)
+            is_self_scan = bool(my_saved_name and name.strip().lower() == my_saved_name.lower())
+
+            if is_self_scan:
+                st.error("Self-scan restriction active. Cannot commit local profile registration into external contact database.")
+                st.button("Save contact data", type="primary", disabled=True)
             else:
                 if st.button("Save contact data", type="primary"):
-                    if not name or not event:
-                        st.error("Name and Event scope configuration fields are required.")
-                    elif contact_exists(current_user, name, event):
-                        st.warning(f"Contact '{name}' already exists in this event folder.")
+                    if not name:
+                        st.error("Name field required.")
+                    elif not event:
+                        st.error("Event context field required.")
+                    elif contact_exists(name, event):
+                        st.warning(f"Contact '{name}' is already recorded under the '{event}' group index.")
                     else:
-                        save_contact(current_user, name, decoded_data, saved_mode, shared_mode, event)
+                        save_contact(name, decoded_data, saved_mode, shared_mode, event)
                         st.session_state["current_event"] = event
-                        st.success(f"Saved '{name}' into partition storage.")
+                        st.success(f"Saved '{name}' under '{saved_mode}' card layout.")
                         st.rerun()
 
     # ---------------------------------------------------------------------------
-    # Tab 3: My Contacts (Isolated View Layer)
+    # Tab 3: My Contacts
     # ---------------------------------------------------------------------------
     with tab_contacts:
         st.subheader("Directory Management")
-        contacts = get_contacts(current_user)
-        
+
+        contacts = get_contacts()
         if not contacts:
-            st.info("Your contact directory path is currently empty.")
+            st.info("Contact directory is empty. Scan or upload codes to view index logs.")
         else:
-            df = pd.DataFrame(contacts, columns=["id", "name", "data", "saved_mode", "shared_mode", "event", "saved_at"])
+            df = pd.DataFrame(
+                contacts,
+                columns=["id", "name", "data", "saved_mode", "shared_mode", "event", "saved_at"],
+            )
 
             col1, col2 = st.columns(2)
             with col1:
                 events = ["All Records"] + sorted(df["event"].unique().tolist())
-                event_filter = st.selectbox("Filter by Event", events)
+                current_event = st.session_state["current_event"]
+                default_event_index = events.index(current_event) if current_event in events else 0
+                event_filter = st.selectbox("Filter by Event Location", events, index=default_event_index)
             with col2:
                 mode_options = ["All Records"] + sorted(df["saved_mode"].unique().tolist())
-                mode_filter = st.selectbox("Filter by Category", mode_options)
+                mode_filter = st.selectbox("Filter by Category Role", mode_options)
 
             filtered = df.copy()
-            if event_filter != "All Records": 
+            if event_filter != "All Records":
                 filtered = filtered[filtered["event"] == event_filter]
-            if mode_filter != "All Records": 
+            if mode_filter != "All Records":
                 filtered = filtered[filtered["saved_mode"] == mode_filter]
+
+            st.write(f"Displaying {len(filtered)} of {len(df)} total verified entries.")
 
             for ev in filtered["event"].unique():
                 ev_df = filtered[filtered["event"] == ev]
-                st.markdown(f"## Location: {ev}")
+                st.markdown(f"## Location: {ev} &nbsp; ({len(ev_df)})")
 
                 for mode in sorted(ev_df["saved_mode"].unique()):
                     mode_df = ev_df[ev_df["saved_mode"] == mode]
-                    st.markdown(f"#### Group: *{mode}*")
+                    st.markdown(f"#### Classification Group: *{mode}*")
 
                     for _, row in mode_df.iterrows():
+                        data = json.loads(row["data"])
+                        
                         c1, c2 = st.columns([6, 1])
                         with c1:
-                            render_business_card(json.loads(row["data"]))
+                            render_business_card(data)
                         with c2:
                             st.caption(f"Added:\n`{row['saved_at'][:10]}`")
-                            if st.button("Remove Card", key=f"del_{row['id']}"):
+                            if st.button("Remove Card", key=f"del_{row['id']}", type="secondary"):
                                 delete_contact(row["id"])
                                 st.rerun()
                 st.divider()
@@ -696,79 +703,73 @@ else:
     # ---------------------------------------------------------------------------
     with tab_analytics:
         st.subheader("Interaction Analysis Matrix")
-        contacts = get_contacts(current_user)
-        scans = get_scan_log(current_user)
+
+        contacts = get_contacts()
+        scans = get_scan_log()
 
         if not contacts and not scans:
-            st.info("No interactive telemetry logged for your profile cluster yet.")
+            st.info("No interaction telemetry logged in local index database parameters.")
         else:
-            df = pd.DataFrame(contacts, columns=["id", "name", "data", "saved_mode", "shared_mode", "event", "saved_at"])
+            df = pd.DataFrame(
+                contacts,
+                columns=["id", "name", "data", "saved_mode", "shared_mode", "event", "saved_at"],
+            )
             scan_df = pd.DataFrame(scans, columns=["shared_mode", "event", "scanned_at"])
 
-            m1, m2 = st.columns(2)
-            m1.metric("Your Total Verified Contacts", len(df))
-            m2.metric("Your Interaction Scans Logged", len(scan_df))
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Synced Database Records", len(df))
+            m2.metric("Total Platform Interactions", len(scan_df))
+            m3.metric("Distinct Events Active", df["event"].nunique() if not df.empty else 0)
 
             if not df.empty:
-                st.markdown("**Distribution Matrix by Category**")
+                st.markdown("**Distribution Matrix by Saved Category**")
                 st.bar_chart(df["saved_mode"].value_counts())
 
-# ---------------------------------------------------------------------------
-# Dynamic Sidebar Control Center (Local Purge vs Global Master Controls)
-# ---------------------------------------------------------------------------
-st.sidebar.markdown("### Control Dashboard Panel")
+                st.markdown("**Distribution Matrix by Event Scope**")
+                st.bar_chart(df["event"].value_counts())
 
-with st.sidebar.expander("Admin & Account Maintenance", expanded=False):
-    # Action 1: User-Isolated Purge (Available to any logged-in user)
-    if st.session_state.get("authentication_status"):
-        st.markdown("#### User Data Utility")
-        if st.button("Purge MY Profile & Contacts Only", use_container_width=True):
-            conn = get_conn()
-            c = conn.cursor()
-            c.execute("DELETE FROM contacts WHERE LOWER(username) = LOWER(?)", (current_user,))
-            c.execute("DELETE FROM scan_log WHERE LOWER(username) = LOWER(?)", (current_user,))
-            conn.commit()
-            conn.close()
-            st.success("Your individual user metrics have been wiped safely.")
-            st.rerun()
-            
-    st.divider()
-    
-    # Action 2: Master Global Developer Overrides
-    st.markdown("#### Master Developer Overrides")
-    admin_password = st.text_input("Master Admin Password", type="password")
+                st.markdown("**Platform Traction Acquisition Timeline**")
+                df["date"] = pd.to_datetime(df["saved_at"]).dt.date
+                st.bar_chart(df.groupby("date").size())
+
+
+# ---------------------------------------------------------------------------
+# Secure System Administration Tooling
+# ---------------------------------------------------------------------------
+st.sidebar.markdown("### System Settings")
+
+with st.sidebar.expander("Developer Access Control", expanded=False):
+    admin_password = st.text_input("Admin Password", type="password")
     correct_password = st.secrets.get("ADMIN_PASSWORD", "admin123")
     
     if admin_password == correct_password:
         st.success("Access Authorized")
+        st.divider()
+        st.markdown("### Developer Utilities")
         
-        if st.button("Load Demo Records to MY Profile", use_container_width=True):
-            if not st.session_state.get("authentication_status"):
-                st.error("Please log into a valid account before applying mock target profiles.")
-            else:
-                try:
-                    import subprocess
-                    subprocess.run(["python", "seed_demo_data.py", current_user], check=True)
-                    st.success(f"Demo entries loaded onto user node: @{current_user}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Seeding failure: {e}")
+        if st.button("Load Demo Database Records", use_container_width=True):
+            try:
+                import subprocess
+                subprocess.run(["python", "seed_demo_data.py"], check=True)
+                st.success("Database seeded successfully via seed_demo_data.py.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Seeding operation failure: {e}")
                 
         st.divider()
-        st.markdown("<span style='color:red; font-weight:bold;'>Global Wipe Action</span>", unsafe_allow_html=True)
-        if st.button("GLOBAL SYSTEM RESET (Flush All Users)", use_container_width=True, type="primary"):
+        st.markdown("<span style='color:red; font-weight:bold;'>Data Wipe Utility</span>", unsafe_allow_html=True)
+        if st.button("Purge System Database", use_container_width=True, type="primary"):
             try:
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
-                c.execute("DROP TABLE IF EXISTS users")
                 c.execute("DROP TABLE IF EXISTS contacts")
                 c.execute("DROP TABLE IF EXISTS scan_log")
                 conn.commit()
                 conn.close()
-                st.cache_resource.clear()
-                st.success("Entire system cluster database dropped and initialized.")
+                init_db()
+                st.success("Database cleared successfully.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Global purge operation failure: {e}")
+                st.error(f"Purge operation failure: {e}")
     elif admin_password:
-        st.error("Invalid credentials.")
+        st.error("Incorrect password.")
